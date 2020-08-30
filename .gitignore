@@ -1,0 +1,15 @@
+.lvimrc
+.pytest_cache
+.cache
+.coverage*
+.python-version
+.tox
+
+build
+data
+dist
+z_scratch
+
+*.egg*
+*.private
+*.png
