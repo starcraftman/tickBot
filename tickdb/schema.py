@@ -82,11 +82,10 @@ class Ticket(Base):
     __tablename__ = 'tickets'
 
     id = sqla.Column(sqla.Integer, primary_key=True)
-    name = sqla.Column(sqla.String(LEN_NAME))
     user_id = sqla.Column(sqla.BigInteger)
     supporter_id = sqla.Column(sqla.BigInteger)
     channel_id = sqla.Column(sqla.BigInteger)
-    guild_id = sqla.Column(sqla.BigInteger)
+    guild_id = sqla.Column(sqla.BigInteger, sqla.ForeignKey('configs.id'))
     created_at = sqla.Column(sqla.DateTime, server_default=sqla.func.now())
     updated_at = sqla.Column(sqla.DateTime, onupdate=sqla.func.now())
 

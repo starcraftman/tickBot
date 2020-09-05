@@ -52,6 +52,19 @@ QUESTIONS = (
     "2) What type of support you would like (sympathy, distraction, advice, personal venting, etc) ?",
     "3) How long you would like to be supported for?",
 )
+PREAMBLE = """Hello. I understand you'd like support.
+Please answer my questions one at a time and then we'll get you some help.
+
+"""
+REQUEST_PING = """"Requesting support for '{user}', please respond {role}.
+{q_text}
+
+Please use command `{prefix}ticket take @{user}` to respond."
+"""
+LOG_TEMPLATE = """__Action__: {action}
+__User__: {user}
+{msg}
+"""
 
 
 async def bot_shutdown(bot):  # pragma: no cover
@@ -236,15 +249,10 @@ class RequestGather():
         """
         Allow the user to answer questions and keep the responses.
         """
-        sent = []
-        preamble = """Hello. I understand you'd like support.
-Please answer my questions one at a time and then we'll get you some help.
+        preamble, sent = PREAMBLE, []
 
-"""
         try:
             for question in self.questions:
-                log = logging.getLogger(__name__)
-                log.error(question)
                 if preamble:
                     question = preamble + question
                     preamble = None
@@ -267,34 +275,37 @@ Please answer my questions one at a time and then we'll get you some help.
         """
         Returns a formatted message to summarize request.
         """
-        msg = "Requesting support for '{}', please respond {}.\n".format(self.author.name, self.role.mention)
+        q_text = ''
         for question, response in zip(self.questions, self.responses):
-            msg += "\n{}\n    {}".format(question, response)
+            q_text += "\n{}\n    {}".format(question, response)
 
-        msg += "\n\nPlease use command `{}ticket take @{}` to respond.".format(self.bot.prefix, self.author.name)
-
-        return msg
+        return REQUEST_PING.format(user=self.author.name, role=self.role.mention,
+                                   prefix=self.bot.prefix, q_text=q_text)
 
 
 class Ticket(Action):
     """
     Provide the ticket command.
     """
-    async def request(self):
+    async def request(self, guild_config, log_channel):
         """
         Request a private ticket with another user.
         """
-        conf = tickdb.query.get_guild_config(self.session, self.msg.guild.id)
-        role = self.msg.guild.get_role(conf.role_id)
+        role = self.msg.guild.get_role(guild_config.role_id)
 
         gather = RequestGather(self.bot, self.msg, role)
         await gather.get_info()
 
         ticket = tickdb.schema.Ticket(user_id=self.msg.author.id, guild_id=self.msg.guild.id)
         self.session.add(ticket)
+
+        await log_channel.send(
+            LOG_TEMPLATE.format(action="Request", user=self.msg.author.name,
+                                msg="Request issued, waiting for responder.")
+        )
         await self.msg.channel.send(gather.format())
 
-    async def take(self):
+    async def take(self, _, log_channel):
         """
         Take a requested ticket.
         """
@@ -303,8 +314,6 @@ class Ticket(Action):
         ticket = tickdb.query.get_ticket(self.session, user_id=user.id)
         ticket.supporter_id = self.msg.author.id
 
-        ticket.name = tick.util.clean_input(NAME_TEMPLATE.format(
-            id=ticket.id, user=user.name, taker=self.msg.author.name))
         overwrites = {
             guild.default_role: discord.PermissionOverwrite(read_messages=False),
             guild.me: discord.PermissionOverwrite(read_messages=True,
@@ -320,20 +329,27 @@ class Ticket(Action):
                                                          read_message_history=True),
         }
         topic = "A private ticket for {}.".format(user.name)
-        chan = await guild.create_text_channel(name=ticket.name, topic=topic,
+        chan_name = tick.util.clean_input(NAME_TEMPLATE.format(
+            id=ticket.id, user=user.name, taker=self.msg.author.name))
+        chan = await guild.create_text_channel(name=chan_name, topic=topic,
                                                overwrites=overwrites,
                                                category=self.msg.channel.category)
         ticket.channel_id = chan.id
         self.session.add(ticket)
 
+        await log_channel.send(
+            LOG_TEMPLATE.format(action="Created", user=user.name,
+                                msg="__Responder:__ {}\n__Channel:__ {} | {}".format(self.msg.author.name, chan.name, chan.mention)),
+        )
         await chan.send(TICKET_WELCOME.format(prefix=self.bot.prefix))
 
-    async def close(self):
+    async def close(self, _, log_channel):
         """
         Close a ticket.
         """
         try:
-            tickdb.query.get_ticket(self.session, channel_id=self.msg.channel.id)
+            ticket = tickdb.query.get_ticket(self.session, channel_id=self.msg.channel.id)
+            user = self.msg.guild.get_member(ticket.user_id)
         except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as e:
             raise tick.exc.InvalidCommandArgs("I can only close within ticket channels.")
 
@@ -349,11 +365,6 @@ class Ticket(Action):
             if not resp.content.strip().lower().startswith('y'):
                 raise asyncio.TimeoutError
 
-            guild_config = tickdb.query.get_guild_config(self.session, self.msg.guild.id)
-            ticket = tickdb.query.get_ticket(self.session, channel_id=self.msg.channel.id)
-            log_channel = self.msg.guild.get_channel(guild_config.log_channel_id)
-            user = self.msg.guild.get_member(ticket.user_id)
-
             await self.msg.channel.send("Closing ticket. Do you wish to get a log of this ticket DMed??\n\nYes/No")
             resp = await self.bot.wait_for(
                 'message',
@@ -362,8 +373,11 @@ class Ticket(Action):
             )
 
             fname = await create_log(resp, self.msg.channel.name + ".txt")
-            await log_channel.send("Closed ticket for user {} with reason {}.".format(user.name, reason),
-                                   files=[discord.File(fp=fname, filename=fname)])
+            await log_channel.send(
+                LOG_TEMPLATE.format(action="Close", user=user.name,
+                                    msg="__Reason:__ {}.".format(reason)),
+                files=[discord.File(fp=fname, filename=fname)]
+            )
             if resp.content.strip().lower().startswith('y'):
                 await user.send("The log of your support session. Take care.",
                                 files=[discord.File(fp=fname, filename=fname)])
@@ -379,23 +393,36 @@ class Ticket(Action):
             except OSError:
                 pass
 
-    async def rename(self):
+    async def rename(self, _, log_channel):
         """
         Rename a ticket.
         """
         try:
-            tickdb.query.get_ticket(self.session, channel_id=self.msg.channel.id)
+            ticket = tickdb.query.get_ticket(self.session, channel_id=self.msg.channel.id)
         except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as e:
             raise tick.exc.InvalidCommandArgs("I can only rename within ticket channels.")
 
-        new_name = tick.util.clean_input(" ".join(self.args.name))[:100]
+        new_name = tick.util.clean_input(" ".join(self.args.name)).lower()[:100]
+        if not new_name.startswith("{}-".format(ticket.id)):
+            new_name = "{}-".format(ticket.id) + new_name
+        old_name = self.msg.channel.name
         await self.msg.channel.edit(reason='New name was requested.', name=new_name)
+        await log_channel.send(
+            LOG_TEMPLATE.format(action="Rename", user=self.msg.author.name,
+                                msg="__Old Name:__ {}\n__New Name:__ {}".format(old_name, new_name)),
+        )
 
-        return 'Rename succesful.'
+        return 'Rename completed.'
 
     async def execute(self):
+        try:
+            guild_config = tickdb.query.get_guild_config(self.session, self.msg.guild.id)
+            log_channel = self.msg.guild.get_channel(guild_config.log_channel_id)
+        except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as e:
+            raise tick.exc.InvalidCommandArgs("Tickets not configured. See `{prefix}admin`".format(self.bot.prefix)) from e
+
         func = getattr(self, self.args.subcmd)
-        resp = await func()
+        resp = await func(guild_config, log_channel)
 
         self.session.commit()
         if resp:
@@ -426,7 +453,10 @@ class Help(Action):
 
         response = '\n'.join(over) + tick.tbl.wrap_markdown(tick.tbl.format_table(lines, header=True))
         await self.bot.send_ttl_message(self.msg.channel, response)
-        await self.msg.delete()
+        try:
+            await self.msg.delete()
+        except discord.NotFound:
+            pass
 
 
 class Status(Action):
