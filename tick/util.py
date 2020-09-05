@@ -10,6 +10,7 @@ import logging
 import logging.handlers
 import logging.config
 import os
+import re
 
 import yaml
 try:
@@ -163,6 +164,24 @@ def init_logging():  # pragma: no cover
             if isinstance(handler, logging.handlers.RotatingFileHandler):
                 print('    %s -> %s' % (name, handler.baseFilename))
                 handler.doRollover()
+
+
+def clean_input(text, *, replace='-'):
+    """
+    Ensure input contains ONLY ASCII characters.
+    Any other character will be replaced with 'replace'.
+
+    Args:
+        text: The text to clean.
+        replace: The replacement character to use.
+
+    Returns:
+        The cleaned text.
+    """
+    text = re.sub(r'[^a-zA-Z0-9-]', replace, text)
+    text = re.sub(r'--+', replace, text)
+
+    return text
 
 
 ROOT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

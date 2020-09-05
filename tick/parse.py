@@ -55,10 +55,39 @@ def register_parser(func):
 @register_parser
 def subs_admin(subs, prefix):
     """ Subcommand parsing for admin """
+    desc = """Admin command, usable by user with the following server role:
+        `Ticket Supervisor`
+
+{prefix}ticket category unique substring
+        Bot will create tickets under the category indicated by `unique substring`.
+{prefix}admin log #mention-log-channel
+        Set bot to log finished tickets to this channel for upload.
+{prefix}ticket role @role
+        Set bot to ping mentioned role for tickets.
+{prefix}ticket support #mention-support-channel
+        Set bot to monitor this channel for support requests.
+    """.format(prefix=prefix)
+    sub = subs.add_parser(prefix + 'admin', description=desc, formatter_class=RawHelp)
+    sub.set_defaults(cmd='Admin')
+    tick_subs = sub.add_subparsers(title='subcommands',
+                                   description='Admin subcommands', dest='subcmd')
+
+    tick_sub = tick_subs.add_parser('category', help='The category to put new tickets under.')
+    tick_sub.add_argument('name', nargs='+', help='The unique substring of the category.')
+    tick_sub = tick_subs.add_parser('logs', help='Send logs to mentioned channel.')
+    tick_sub = tick_subs.add_parser('role', help='The role to ping for tickets.')
+    tick_sub = tick_subs.add_parser('support', help='Respond to support in mentioned channel.')
+
+
+@register_parser
+def subs_ticket(subs, prefix):
+    """ Subcommand parsing for admin """
     desc = """Ticket command.
 
-{prefix}ticket create name of the ticket
+{prefix}ticket request
         Create a ticket.
+{prefix}ticket take @user
+        Take a ticket created by another user.
 {prefix}ticket close
         Close a ticket.
 {prefix}ticket rename
@@ -69,8 +98,8 @@ def subs_admin(subs, prefix):
     tick_subs = sub.add_subparsers(title='subcommands',
                                    description='Ticket subcommands', dest='subcmd')
 
-    tick_sub = tick_subs.add_parser('create', help='Create a new ticket.')
-    tick_sub.add_argument('name', nargs='+', help='The name of the ticket.')
+    tick_sub = tick_subs.add_parser('request', help='Create a new ticket.')
+    tick_sub = tick_subs.add_parser('take', help='Take a ticket.')
     tick_sub = tick_subs.add_parser('close', help='Close a ticket.')
     tick_sub.add_argument('reason', nargs='+', help='The name of the ticket.')
     tick_sub = tick_subs.add_parser('rename', help='ate a new ticket.')

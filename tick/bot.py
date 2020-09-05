@@ -26,7 +26,6 @@ import os
 import pprint
 import re
 
-import apiclient
 import discord
 import websockets.exceptions
 try:
