@@ -1,0 +1,80 @@
+# Reference: https://docs.python.org/3/library/logging.html
+# Tutorial: https://docs.python.org/3/howto/logging.html#logging-basic-tutorial
+---
+version: 1
+disable_existing_loggers: true
+incremental: false
+
+formatters:
+  custom:
+    (): logging.Formatter
+    format: "[%(levelname)-5.5s] %(asctime)s %(name)s.%(funcName)s()::%(lineno)s | %(message)s"
+
+fhandler_template: &default_handler
+  class: logging.handlers.RotatingFileHandler
+  formatter: custom
+  level: DEBUG
+  maxBytes: 10485760
+  backupCount: 3
+  encoding: utf8
+
+handlers:
+  aiozmq:
+    <<: *default_handler
+    filename: /tmp/tick/aiozmq.log
+  asyncio:
+    <<: *default_handler
+    filename: /tmp/tick/asyncio.log
+  tick:
+    <<: *default_handler
+    filename: /tmp/tick/main.log
+  tickdb:
+    <<: *default_handler
+    filename: /tmp/tick/db.log
+  discord:
+    <<: *default_handler
+    filename: /tmp/tick/discord.log
+  debug_stream:
+    class: logging.StreamHandler
+    level: DEBUG
+    formatter: custom
+    stream: ext://sys.stdout
+  warn_stream:
+    class: logging.StreamHandler
+    level: WARNING
+    formatter: custom
+    stream: ext://sys.stdout
+  info_stream:
+    class: logging.StreamHandler
+    level: INFO
+    formatter: custom
+    stream: ext://sys.stdout
+  err_stream:
+    class: logging.StreamHandler
+    level: ERROR
+    formatter: custom
+    stream: ext://sys.stdout
+  nullh:
+    class: logging.NullHandler
+
+loggers:
+  aiozmq:
+    level: DEBUG
+    handlers: [aiozmq, err_stream]
+  asyncio:
+    level: DEBUG
+    handlers: [asyncio, warn_stream]
+  discord:
+    level: DEBUG
+    handlers: [discord, warn_stream]
+  tick:
+    level: DEBUG
+    handlers: [tick, info_stream]
+  # tickdb:
+    # level: DEBUG
+    # handlers: [cogdb, info_stream]
+
+# Nullify any non-explicit handling of logs
+root:
+  handlers: [nullh]
+  level: DEBUG
