@@ -56,7 +56,7 @@ PREAMBLE = """Hello. I understand you'd like support.
 Please answer my questions one at a time and then we'll get you some help.
 
 """
-REQUEST_PING = """"Requesting support for '{user}', please respond {role}.
+REQUEST_PING = """Requesting support for '{user}', please respond {role}.
 {q_text}
 
 Please use command `{prefix}ticket take @{user}` to respond."
@@ -113,6 +113,28 @@ class Admin(Action):
     """
     Provide the ticket command.
     """
+    async def active(self, guild_config):
+        """
+        Set the target category to create new tickets under.
+        Cannot mention categories so pass a substring that is unique.
+
+        Args:
+            guild_config: The guild configuration to update.
+        """
+        _, three_ago, seven_ago = tickdb.query.get_active_tickets(self.session, guild_config.id)
+
+        msg = "__Tickets No Activity 7 Days__\n"
+        lines = [['Ticket Channel', 'Date']] + \
+            [[tick.channel_name, tick.last_msg] for tick in seven_ago]
+        msg += tick.tbl.wrap_markdown(tick.tbl.format_table(lines, header=True))
+        await self.msg.channel.send(msg)
+
+        msg = "\n\n__Tickets No Activity 3 Days__\n"
+        lines = [['Ticket Channel', 'Date']] + \
+            [[tick.channel_name, tick.last_msg] for tick in three_ago]
+        msg += tick.tbl.wrap_markdown(tick.tbl.format_table(lines, header=True))
+        await self.msg.channel.send(msg)
+
     async def category(self, guild_config):
         """
         Set the target category to create new tickets under.
@@ -351,7 +373,7 @@ class Ticket(Action):
             ticket = tickdb.query.get_ticket(self.session, channel_id=self.msg.channel.id)
             user = self.msg.guild.get_member(ticket.user_id)
         except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as e:
-            raise tick.exc.InvalidCommandArgs("I can only close within ticket channels.")
+            raise tick.exc.InvalidCommandArgs("I can only close within ticket channels.") from e
 
         reason = ' '.join(self.args.reason)
         resp, fname = '', ''
@@ -419,7 +441,7 @@ class Ticket(Action):
             guild_config = tickdb.query.get_guild_config(self.session, self.msg.guild.id)
             log_channel = self.msg.guild.get_channel(guild_config.log_channel_id)
         except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as e:
-            raise tick.exc.InvalidCommandArgs("Tickets not configured. See `{prefix}admin`".format(self.bot.prefix)) from e
+            raise tick.exc.InvalidCommandArgs("Tickets not configured. See `{prefix}admin`".format(prefix=self.bot.prefix)) from e
 
         func = getattr(self, self.args.subcmd)
         resp = await func(guild_config, log_channel)

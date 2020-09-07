@@ -12,7 +12,6 @@ Relationship backrefs:
     http://docs.sqlalchemy.org/en/latest/orm/backref.html#relationships-backref
 """
 import logging
-import os
 import sys
 
 import sqlalchemy
@@ -31,7 +30,7 @@ CREDS['db'] = 'tick'
 
 TEST_DB = False
 if 'pytest' in sys.modules:
-    CREDS['db'] = 'test'
+    CREDS['db'] = 'test_tick'
     TEST_DB = True
 
 engine = sqlalchemy.create_engine(MYSQL_SPEC.format(**CREDS), echo=False, pool_recycle=3600)
@@ -50,7 +49,7 @@ def fresh_sessionmaker(db=None):
     """
     creds = tick.util.get_config('dbs', 'main')
     if not db:
-        db = os.environ.get('COG_TOKEN', 'dev')
+        db = 'tick'
     creds['db'] = db
 
     eng = sqlalchemy.create_engine(MYSQL_SPEC.format(**creds), echo=False, pool_recycle=3600)
