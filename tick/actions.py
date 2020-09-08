@@ -236,10 +236,6 @@ class Admin(Action):
             self.log.debug("Creating config for server: %s with id %d", guild.name, guild.id)
         self.log.info("Requested config of: %d\nFound: %s", guild.id, guild_config)
 
-        if guild_config.name != guild.name:
-            guild_config.name = guild.name
-            self.session.add(guild_config)
-
         func = getattr(self, self.args.subcmd)
         resp = await func(guild_config)
         self.session.commit()
