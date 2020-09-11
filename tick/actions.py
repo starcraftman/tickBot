@@ -324,11 +324,15 @@ class Ticket(Action):
         )
         await self.msg.channel.send(gather.format())
 
-    async def take(self, _, log_channel):
+    async def take(self, guild_config, log_channel):
         """
         Take a requested ticket.
         """
         guild = self.msg.guild
+        role = guild.get_role(guild_config.role_id)
+        if not [x for x in self.msg.author.roles if x == role]:
+            raise tick.exc.InvalidPerms("You are missing a required role. You need: `{}`".format(role.name))
+
         user = self.msg.mentions[0]
         ticket = tickdb.query.get_ticket(self.session, self.msg.guild.id, user_id=user.id)
         ticket.supporter_id = self.msg.author.id
