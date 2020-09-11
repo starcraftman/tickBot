@@ -6,6 +6,8 @@ All actions have async execute methods.
 import asyncio
 import logging
 import os
+import shutil
+import tempfile
 
 import aiofiles
 import aiomock
@@ -395,15 +397,15 @@ class Ticket(Action):
                 timeout=30
             )
 
-            fname = await create_log(resp, self.msg.channel.name + ".txt")
+            fname = await create_log(resp, os.path.join(tempfile.mkdtemp(), self.msg.channel.name + ".txt"))
             await log_channel.send(
                 LOG_TEMPLATE.format(action="Close", user=user.name,
                                     msg="__Reason:__ {}.".format(reason)),
-                files=[discord.File(fp=fname, filename=fname)]
+                files=[discord.File(fp=fname, filename=os.path.basename(fname))]
             )
             if resp.content.strip().lower().startswith('y'):
                 await user.send("The log of your support session. Take care.",
-                                files=[discord.File(fp=fname, filename=fname)])
+                                files=[discord.File(fp=fname, filename=os.path.basename(fname))])
             await self.msg.channel.delete(reason=reason)
             self.session.delete(ticket)
         except asyncio.TimeoutError:
@@ -412,8 +414,8 @@ class Ticket(Action):
             await self.msg.channel.send("A critical error found, database record could not be retrieved.")
         finally:
             try:
-                os.remove(fname)
-            except OSError:
+                shutil.rmtree(os.path.dirname(fname))
+            except (FileNotFoundError, OSError):
                 pass
 
     async def rename(self, _, log_channel):
@@ -505,7 +507,7 @@ async def create_log(last_msg, fname=None):
     Log a whole channel's history to a file for preservation.
 
     Args:
-        filename: The file to write to
+        filename: The path of the file to write out.
         last_msg: The last message sent in channel to archive
 
     Returns: The file path.
