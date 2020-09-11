@@ -88,9 +88,9 @@ def subs_ticket(subs, prefix):
         Create a ticket.
 {prefix}ticket take @user
         Take a ticket created by another user.
-{prefix}ticket close
+{prefix}ticket close A reason to close ticket.
         Close a ticket.
-{prefix}ticket rename
+{prefix}ticket rename a-new-name
         Rename an existing ticket from inside the channel.
     """.format(prefix=prefix)
     sub = subs.add_parser(prefix + 'ticket', description=desc, formatter_class=RawHelp)

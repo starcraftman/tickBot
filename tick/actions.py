@@ -330,7 +330,7 @@ class Ticket(Action):
         """
         guild = self.msg.guild
         user = self.msg.mentions[0]
-        ticket = tickdb.query.get_ticket(self.session, user_id=user.id)
+        ticket = tickdb.query.get_ticket(self.session, self.msg.guild.id, user_id=user.id)
         ticket.supporter_id = self.msg.author.id
 
         overwrites = {
@@ -367,7 +367,7 @@ class Ticket(Action):
         Close a ticket.
         """
         try:
-            ticket = tickdb.query.get_ticket(self.session, channel_id=self.msg.channel.id)
+            ticket = tickdb.query.get_ticket(self.session, self.msg.guild.id, channel_id=self.msg.channel.id)
             user = self.msg.guild.get_member(ticket.user_id)
         except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as e:
             raise tick.exc.InvalidCommandArgs("I can only close within ticket channels.") from e
@@ -417,7 +417,7 @@ class Ticket(Action):
         Rename a ticket.
         """
         try:
-            ticket = tickdb.query.get_ticket(self.session, channel_id=self.msg.channel.id)
+            ticket = tickdb.query.get_ticket(self.session, self.msg.guild.id, channel_id=self.msg.channel.id)
         except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as e:
             raise tick.exc.InvalidCommandArgs("I can only rename within ticket channels.")
 
