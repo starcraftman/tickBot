@@ -8,6 +8,7 @@ import logging
 import os
 
 import aiofiles
+import aiomock
 import discord
 import sqlalchemy.orm.exc as sqla_oexc
 
@@ -436,6 +437,10 @@ class Ticket(Action):
         try:
             guild_config = tickdb.query.get_guild_config(self.session, self.msg.guild.id)
             log_channel = self.msg.guild.get_channel(guild_config.log_channel_id)
+            # If log channel not configured, dev null log messages
+            if not log_channel:
+                log_channel = aiomock.AIOMock()
+                log_channel.send.async_return_value = True
         except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as e:
             raise tick.exc.InvalidCommandArgs("Tickets not configured. See `{prefix}admin`".format(prefix=self.bot.prefix)) from e
 

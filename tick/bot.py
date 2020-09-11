@@ -316,7 +316,7 @@ async def presence_task(bot, delay=180):
 def main():  # pragma: no cover
     """ Entry here! """
     tick.util.init_logging()
-    tick.util.BOT = TickBot("!")
+    tick.util.BOT = TickBot(tick.util.get_config('prefix', default='!'))
 
     token = tick.util.get_config('discord', os.environ.get('TOKEN', 'dev'))
     print("Waiting on connection to Discord ...")
