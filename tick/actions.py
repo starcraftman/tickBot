@@ -231,7 +231,7 @@ class Admin(Action):
         try:
             guild_config = tickdb.query.get_guild_config(self.session, guild.id)
         except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound):
-            guild_config = tickdb.schema.GuildConfig(id=guild.id, name=guild.name)
+            guild_config = tickdb.schema.GuildConfig(id=guild.id)
             self.session.add(guild_config)
             self.session.commit()
             self.log.debug("Creating config for server: %s with id %d", guild.name, guild.id)
