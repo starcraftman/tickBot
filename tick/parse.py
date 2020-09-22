@@ -76,6 +76,7 @@ def subs_admin(subs, prefix):
     tick_sub.add_argument('name', nargs='+', help='The unique substring of the category.')
     tick_sub = tick_subs.add_parser('logs', help='Send logs to mentioned channel.')
     tick_sub = tick_subs.add_parser('role', help='The role to ping for tickets.')
+    tick_sub = tick_subs.add_parser('adult_role', help='The role to ping for adult tickets.')
     tick_sub = tick_subs.add_parser('support', help='Respond to support in mentioned channel.')
 
 

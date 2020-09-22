@@ -21,9 +21,11 @@ class GuildConfig(Base):
 
     id = sqla.Column(sqla.BigInteger, primary_key=True)  # The actual guild id
     support_channel_id = sqla.Column(sqla.BigInteger)
+    support_pin_id = sqla.Column(sqla.BigInteger)
     category_channel_id = sqla.Column(sqla.BigInteger)
     log_channel_id = sqla.Column(sqla.BigInteger)
     role_id = sqla.Column(sqla.BigInteger)
+    adult_role_id = sqla.Column(sqla.BigInteger)
 
     def __repr__(self):
         keys = ['id', 'support_channel_id', 'category_channel_id', 'log_channel_id', 'role_id']

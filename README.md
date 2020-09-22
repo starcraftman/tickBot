@@ -6,8 +6,12 @@ A simple ticket bot was requested so I am making it.
 
 ### Requirements
 
-1) prompts the user to respond to a few questions and
-2) once that response is given pings supporters. Then it
-3) opens a channel when a supporter runs a command and ats the supportee and
-4) removes perms for those two members once the session is over
-5) Probably log all tickets to server.5) Probably log all tickets to server.
+So react to get support, then type out answers to the prompt,
+then bot spits out questions with your answer and pings trusted support,
+then trusted support only can react to a message / that message to open channel.
+Once in the channel, $ticket close reason is probably as good as a react, and
+then there are prompts there to type out (or that could be reactions with yes / no but
+idt that would make too much of a difference either)
+Oh also if it pings the users when the ticket is open, that might be nice too,
+because it might be confusing where the ticket is otherwise, cause it doesn’t teleport you
+into that channel when it opens so you might not see it

@@ -23,10 +23,14 @@ import tickdb.schema
 
 
 # TODO: Put some of this in config.yml?
+PIN_EMOJI = "❣️"
+YES_EMOJI = "✅"
+NO_EMOJI = "❌"
+TICKET_TIMEOUT = tick.util.get_config('ticket_timeout')
 ADMIN_ROLE = "Ticket Supervisor"
 LOG_PERMS = discord.Permissions(read_messages=True, send_messages=True, attach_files=True)
-SUPPORT_PERMS = discord.Permissions(read_messages=True, send_messages=True, manage_messages=True)
-TICKET_PERMS = discord.Permissions(read_messages=True, manage_channels=True)
+SUPPORT_PERMS = discord.Permissions(read_messages=True, send_messages=True, manage_messages=True, add_reactions=True)
+TICKET_PERMS = discord.Permissions(read_messages=True, manage_channels=True, add_reactions=True)
 PERMS_TEMPLATE = """This bot requires following perms for {}:
 {}
 
@@ -51,24 +55,31 @@ TRANSCRIPT_ENTRY = """{date} {author} ({id})
 -----------------------------
 """
 QUESTIONS = (
-    "1) Are there any triggers involved or is the topic NSFW as detailed in #server-rules ?",
-    "2) What type of support you would like (sympathy, distraction, advice, personal venting, etc) ?",
-    "3) How long you would like to be supported for?",
+    "Could you briefly describe the topic? If you wish it to remain private, type no.",
+    "What type of support you would like? For example: sympathy, distraction, advice, personal venting, etc ...",
+    "How long you would like to be supported for?",
 )
-PREAMBLE = """Hello. I understand you'd like support.
-Please answer my questions one at a time and then we'll get you some help.
-
-"""
 REQUEST_PING = """Requesting support for '{user}', please respond {role}.
 {q_text}
 
-Please use command `{prefix}ticket take @{user}` to respond."
+Please react to this message to take this ticket.
 """
 LOG_TEMPLATE = """__Action__: {action}
 __User__: {user}
 {msg}
 """
+TICKET_REQUEST_INFO = """
+To request a ticket react to this text by clicking the checkmark reaction.
 
+A ticket is a private impromptu support session in private.
+You will be asked some questions to help narrow things down, please respond in the ticket.
+"""
+PREAMBLE = """Hello. I understand you'd like support.
+Please answer my questions one at a time and then we'll get you some help.
+
+Do you need NSFW support? This would be for any adult topics or triggers as described in {chan} .
+Please react below with {check} for NSFW or {cross} for regular support.
+"""
 
 async def bot_shutdown(bot):  # pragma: no cover
     """
@@ -158,14 +169,15 @@ class Admin(Action):
         if not TICKET_PERMS.is_subset(cat.permissions_for(cat.guild.me)):
             perms = """
         Read Messages
-        Manage Channels"""
+        Manage Channels
+        Add Reactions"""
             raise tick.exc.InvalidPerms(PERMS_TEMPLATE.format("Ticket Category Channel", perms))
 
         guild_config.category_channel_id = cat.id
         self.session.add(guild_config)
         self.log.debug("Matched Category '%s' for guild %s", cat.name, cat.guild)
 
-        return "Setting new tickets to be created under category:\n\n__%s__" % cat.name
+        return "Setting new tickets to be created under category:\n\n**%s**" % cat.name
 
     async def logs(self, guild_config):
         """
@@ -185,11 +197,11 @@ class Admin(Action):
         guild_config.log_channel_id = channel.id
         self.session.add(guild_config)
 
-        return "Setting the logging channel to:\n\n__%s__" % channel.name
+        return "Setting the logging channel to:\n\n**%s**" % channel.name
 
     async def support(self, guild_config):
         """
-        Set the support channel to monitor.
+        Set the support pinned message to react to for support.
 
         Args:
             guild_config: The guild configuration to update.
@@ -200,13 +212,17 @@ class Admin(Action):
             perms = """
         Read Messages
         Send Messages
-        Manage Messages"""
-            raise tick.exc.InvalidPerms(PERMS_TEMPLATE.format("SUpport Channel", perms))
+        Manage Messages
+        Add Reactions"""
+            raise tick.exc.InvalidPerms(PERMS_TEMPLATE.format("Support Channel", perms))
 
-        guild_config.support_channel_id = channel.id
-        self.session.add(guild_config)
+        sent = await channel.send(TICKET_REQUEST_INFO)
+        await sent.pin()
+        await sent.add_reaction(PIN_EMOJI)
 
-        return "Setting command monitoring to:\n\n__%s__" % channel.name
+        guild_config.support_channel_id = sent.channel.id
+        guild_config.support_pin_id = sent.id
+        return "Tickets can now be started by reacting to pinned message.\nIf you delete it just run support command again."
 
     async def role(self, guild_config):
         """
@@ -220,7 +236,21 @@ class Admin(Action):
         guild_config.role_id = role.id
         self.session.add(guild_config)
 
-        return "Setting tickets to ping:\n\n__%s__" % role.name
+        return "Setting tickets to ping:\n\n**%s**" % role.name
+
+    async def adult_role(self, guild_config):
+        """
+        Set the role to ping for adult tickets.
+
+        Args:
+            guild_config: The guild configuration to update.
+        """
+        role = self.msg.role_mentions[0]
+
+        guild_config.adult_role_id = role.id
+        self.session.add(guild_config)
+
+        return "Setting adult tickets to ping:\n\n**%s**" % role.name
 
     async def execute(self):
         """
@@ -251,38 +281,30 @@ class RequestGather():
     """
     A simple object to gather information from the user and reformat it.
     """
-    def __init__(self, bot, orig_msg, role):
+    def __init__(self, bot, chan, author):
         self.bot = bot
-        self.msg = orig_msg
-        self.role = role
+        self.chan = chan
+        self.author = author
         self.questions = QUESTIONS
         self.responses = []
-
-    @property
-    def chan(self):
-        return self.msg.channel
-
-    @property
-    def author(self):
-        return self.msg.author
 
     async def get_info(self):
         """
         Allow the user to answer questions and keep the responses.
         """
-        preamble, sent = PREAMBLE, []
+        sent = []
+        server_rules = discord.utils.get(self.chan.guild.channels, name='server-rules')
+        adult_needed, msg = await wait_for_user_reaction(
+            self.bot, self.chan, self.author, PREAMBLE.format(chan=server_rules.mention, check=YES_EMOJI, cross=NO_EMOJI))
+        sent += [msg]
 
         try:
-            for question in self.questions:
-                if preamble:
-                    question = preamble + question
-                    preamble = None
-
-                sent += [await self.chan.send(question)]
+            for ind, question in enumerate(self.questions, start=1):
+                sent += [await self.chan.send("{}) {}".format(ind, question))]
                 resp = await self.bot.wait_for(
                     'message',
                     check=lambda m: m.author == self.author and m.channel == self.chan,
-                    timeout=30,
+                    timeout=TICKET_TIMEOUT,
                 )
                 sent += [resp]
                 self.responses += [resp.content]
@@ -292,82 +314,106 @@ class RequestGather():
             if sent:
                 await self.chan.delete_messages(sent)
 
-    def format(self):
+        return adult_needed
+
+    def format(self, roles):
         """
         Returns a formatted message to summarize request.
         """
+        role_msg = " ".join([x.mention for x in roles])
         q_text = ''
         for question, response in zip(self.questions, self.responses):
             q_text += "\n{}\n    {}".format(question, response)
 
-        return REQUEST_PING.format(user=self.author.name, role=self.role.mention,
+        return REQUEST_PING.format(user=self.author.name, role=role_msg,
                                    prefix=self.bot.prefix, q_text=q_text)
+
+
+async def ticket_request(client, chan, user, config):
+    """
+    Request a private ticket on the server. Engages in several steps to complete.
+        - Gather information from user.
+        - Ping required roles to get a response.
+        - Responder reacts to message and must have right roles.
+        - Ticket is created in database and private channel added on server.
+        - Issue welcome message to channel.
+
+    Args:
+        client: An instance of the bot.
+        user: The original requesting user.
+        chan: The original requesting channel.
+        config: A configuration for the guild.
+    """
+    guild = chan.guild
+
+    gather = RequestGather(client, chan, user)
+    roles = [guild.get_role(config.role_id)]
+    if await gather.get_info() and config.adult_role_id:
+        roles += [guild.get_role(config.adult_role_id)]
+
+    log_channel = guild.get_channel(config.log_channel_id)
+    if log_channel:
+        await log_channel.send(
+            LOG_TEMPLATE.format(action="Request", user=user.name,
+                                msg="Request issued, waiting for responder.")
+        )
+    sent = await chan.send(gather.format(roles))
+    await sent.add_reaction(YES_EMOJI)
+
+    def check(c_react, c_user):
+        can_respond = False
+        for role in c_user.roles:
+            if role in roles:
+                can_respond = True
+
+        return can_respond and str(c_react) == YES_EMOJI
+    _, responder = await client.wait_for('reaction_add', check=check, timeout=TICKET_TIMEOUT)
+    await sent.delete()
+
+    ticket = tickdb.schema.Ticket(user_id=user.id, supporter_id=responder.id, guild_id=guild.id)
+    session = tickdb.Session()
+    session.add(ticket)
+    session.flush()
+
+    overwrites = {
+        guild.default_role: discord.PermissionOverwrite(read_messages=False),
+        guild.me: discord.PermissionOverwrite(read_messages=True,
+                                              send_messages=True,
+                                              manage_messages=True,
+                                              manage_channels=True,
+                                              read_message_history=True,
+                                              add_reactions=True),
+        user: discord.PermissionOverwrite(read_messages=True,
+                                          send_messages=True,
+                                          read_message_history=True,
+                                          add_reactions=True),
+        responder: discord.PermissionOverwrite(read_messages=True,
+                                               send_messages=True,
+                                               read_message_history=True,
+                                               add_reactions=True),
+    }
+    ticket_name = tick.util.clean_input(NAME_TEMPLATE.format(
+        id=ticket.id, user=user.name, taker=responder.name))
+    ticket_category = [x for x in guild.categories if x.id == config.category_channel_id][0]
+    ticket_channel = await guild.create_text_channel(name=ticket_name,
+                                                     topic="A private ticket for {}.".format(user.name),
+                                                     overwrites=overwrites,
+                                                     category=ticket_category)
+    ticket.channel_id = ticket_channel.id
+    session.commit()
+
+    if log_channel:
+        await log_channel.send(
+            LOG_TEMPLATE.format(action="Created", user=user.name,
+                                msg="__Responder:__ {}\n__Channel:__ {} | {}".format(responder.name, chan.name, chan.mention)),
+        )
+    await ticket_channel.send(TICKET_WELCOME.format(prefix=client.prefix))
 
 
 class Ticket(Action):
     """
     Provide the ticket command.
     """
-    async def request(self, guild_config, log_channel):
-        """
-        Request a private ticket with another user.
-        """
-        role = self.msg.guild.get_role(guild_config.role_id)
-
-        gather = RequestGather(self.bot, self.msg, role)
-        await gather.get_info()
-
-        ticket = tickdb.schema.Ticket(user_id=self.msg.author.id, guild_id=self.msg.guild.id)
-        self.session.add(ticket)
-
-        await log_channel.send(
-            LOG_TEMPLATE.format(action="Request", user=self.msg.author.name,
-                                msg="Request issued, waiting for responder.")
-        )
-        await self.msg.channel.send(gather.format())
-
-    async def take(self, guild_config, log_channel):
-        """
-        Take a requested ticket.
-        """
-        guild = self.msg.guild
-        role = guild.get_role(guild_config.role_id)
-        if not [x for x in self.msg.author.roles if x == role]:
-            raise tick.exc.InvalidPerms("You are missing a required role. You need: `{}`".format(role.name))
-
-        user = self.msg.mentions[0]
-        ticket = tickdb.query.get_ticket(self.session, self.msg.guild.id, user_id=user.id)
-        ticket.supporter_id = self.msg.author.id
-
-        overwrites = {
-            guild.default_role: discord.PermissionOverwrite(read_messages=False),
-            guild.me: discord.PermissionOverwrite(read_messages=True,
-                                                  send_messages=True,
-                                                  manage_messages=True,
-                                                  manage_channels=True,
-                                                  read_message_history=True),
-            user: discord.PermissionOverwrite(read_messages=True,
-                                              send_messages=True,
-                                              read_message_history=True),
-            self.msg.author: discord.PermissionOverwrite(read_messages=True,
-                                                         send_messages=True,
-                                                         read_message_history=True),
-        }
-        topic = "A private ticket for {}.".format(user.name)
-        chan_name = tick.util.clean_input(NAME_TEMPLATE.format(
-            id=ticket.id, user=user.name, taker=self.msg.author.name))
-        chan = await guild.create_text_channel(name=chan_name, topic=topic,
-                                               overwrites=overwrites,
-                                               category=self.msg.channel.category)
-        ticket.channel_id = chan.id
-        self.session.add(ticket)
-
-        await log_channel.send(
-            LOG_TEMPLATE.format(action="Created", user=user.name,
-                                msg="__Responder:__ {}\n__Channel:__ {} | {}".format(self.msg.author.name, chan.name, chan.mention)),
-        )
-        await chan.send(TICKET_WELCOME.format(prefix=self.bot.prefix))
-
     async def close(self, _, log_channel):
         """
         Close a ticket.
@@ -381,29 +427,23 @@ class Ticket(Action):
         reason = ' '.join(self.args.reason)
         resp, fname = '', ''
         try:
-            await self.msg.channel.send("This will terminate the ticket. Do you want to confirm?\n\nYes/No")
-            resp = await self.bot.wait_for(
-                'message',
-                check=lambda m: m.author == self.msg.author and m.channel == self.msg.channel,
-                timeout=30
-            )
-            if not resp.content.strip().lower().startswith('y'):
+            resp, msg = await wait_for_user_reaction(
+                self.bot, self.msg.channel, self.msg.author,
+                "Please confirm that you want to close ticket by reacting below.")
+            if not resp:
                 raise asyncio.TimeoutError
 
-            await self.msg.channel.send("Closing ticket. Do you wish to get a log of this ticket DMed??\n\nYes/No")
-            resp = await self.bot.wait_for(
-                'message',
-                check=lambda m: m.author == self.msg.author and m.channel == self.msg.channel,
-                timeout=30
-            )
-
-            fname = await create_log(resp, os.path.join(tempfile.mkdtemp(), self.msg.channel.name + ".txt"))
+            fname = await create_log(msg, os.path.join(tempfile.mkdtemp(), self.msg.channel.name + ".txt"))
             await log_channel.send(
                 LOG_TEMPLATE.format(action="Close", user=user.name,
                                     msg="__Reason:__ {}.".format(reason)),
                 files=[discord.File(fp=fname, filename=os.path.basename(fname))]
             )
-            if resp.content.strip().lower().startswith('y'):
+
+            resp, _ = await wait_for_user_reaction(
+                self.bot, self.msg.channel, self.msg.author,
+                "Closing ticket. Do you want a log of this ticket DMed??")
+            if resp:
                 await user.send("The log of your support session. Take care.",
                                 files=[discord.File(fp=fname, filename=os.path.basename(fname))])
             await self.msg.channel.delete(reason=reason)
@@ -535,3 +575,31 @@ async def create_log(last_msg, fname=None):
             await fout.write(to_flush)
 
     return fname
+
+
+async def wait_for_user_reaction(client, chan, author, text, *, yes=YES_EMOJI, no=NO_EMOJI):
+    """
+    A simple reusable mechanism to present user with a choice and wait for reaction.
+
+    Args:
+        client: The bot client.
+        orig_msg: A previous message in desired channel from author.
+        text: The message to send to channel.
+    Kwargs:
+        yes: The yes emoji to use in unicode.
+        no: The no emoji to use in unicode.
+
+    Returns: (Boolean, msg_sent)
+        True if user accepted otherwise False.
+    """
+    msg = await chan.send(text)
+
+    await msg.add_reaction(yes)
+    await msg.add_reaction(no)
+
+    def check(react, user):
+        return user == author and str(react) in (yes, no)
+
+    react, _ = await client.wait_for('reaction_add', check=check, timeout=TICKET_TIMEOUT)
+
+    return str(react) == yes, msg

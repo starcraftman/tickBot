@@ -27,6 +27,7 @@ import pprint
 import re
 
 import discord
+import sqlalchemy
 import websockets.exceptions
 try:
     import uvloop
@@ -41,6 +42,7 @@ import tick.actions
 import tick.exc
 import tick.parse
 import tick.util
+import tickdb.query
 
 
 SYNC_NOTICE = """Synchronizing sheet changes.
@@ -145,6 +147,30 @@ class TickBot(discord.Client):
         """ Called when emojis change, just update all emojis. """
         self.emoji.update(self.guilds)
 
+    async def on_raw_reaction_add(self, payload):
+        """
+        Monitor reactions on pinned messages for support.
+        When reactions are added, initiate a new request for support.
+        """
+        try:
+            chan = self.get_channel(payload.channel_id)
+            msg = await chan.fetch_message(payload.message_id)
+
+            if isinstance(chan, discord.DMChannel) or payload.member == self.user:
+                return
+
+            config = tickdb.query.get_guild_config(tickdb.Session(), chan.guild.id)
+            if config.support_pin_id and msg.id == config.support_pin_id:
+                for reaction in msg.reactions:
+                    if str(reaction.emoji) == tick.actions.PIN_EMOJI:
+                        await reaction.remove(payload.member)
+
+                await tick.actions.ticket_request(self, chan, payload.member, config)
+        except sqlalchemy.orm.exc.NoResultFound:
+            pass
+        except discord.errors.NotFound:
+            pass
+
     async def on_ready(self):
         """
         Event triggered when connection established to discord and bot ready.
@@ -242,24 +268,6 @@ class TickBot(discord.Client):
                     await message.delete()
             except discord.DiscordException:
                 pass
-
-        #  except discord.DiscordException as exc:
-            #  if exc.args[0].startswith("BAD REQUEST (status code: 400"):
-                #  resp = "Response would be > 2000 chars, I cannot transmit it to Discord."
-                #  resp += "\n\nIf this useage is valid see Gears."
-
-                #  await self.send_ttl_message(channel, resp)
-                #  try:
-                    #  if edit_time == message.edited_at:
-                        #  await message.delete()
-                #  except discord.DiscordException:
-                    #  pass
-            #  else:
-                #  gears = self.get_member_by_substr("gearsand").mention
-                #  await channel.send("A critical discord error! {}.".format(gears))
-            #  line = "Discord.py Library raised an exception"
-            #  line += tick.exc.log_format(content=content, author=author, channel=channel)
-            #  log.exception(line)
 
     async def dispatch_command(self, **kwargs):
         """
