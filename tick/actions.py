@@ -22,28 +22,27 @@ import tickdb.query
 import tickdb.schema
 
 
-# TODO: Put some of this in config.yml?
-PIN_EMOJI = "❣️"
-YES_EMOJI = "✅"
-NO_EMOJI = "❌"
-TICKET_TIMEOUT = tick.util.get_config('ticket_timeout')
-ADMIN_ROLE = "Ticket Supervisor"
+TICKET_TIMEOUT = tick.util.get_config('ticket', 'timeout')
+PIN_EMOJI = tick.util.get_config('emojis', 'pin')
+YES_EMOJI = tick.util.get_config('emojis', '_yes')
+NO_EMOJI = tick.util.get_config('emojis', '_no')
+ADMIN_ROLE = tick.util.get_config('ticket', 'admin_role')
+
 LOG_PERMS = discord.Permissions(read_messages=True, send_messages=True, attach_files=True)
 SUPPORT_PERMS = discord.Permissions(read_messages=True, send_messages=True, manage_messages=True, add_reactions=True)
 TICKET_PERMS = discord.Permissions(read_messages=True, manage_channels=True, add_reactions=True)
+
+QUESTIONS = (
+    "Could you briefly describe the topic? If you wish it to remain private, type no.",
+    "What type of support you would like? For example: sympathy, distraction, advice, personal venting, etc ...",
+    "How long you would like to be supported for?",
+)
+NAME_TEMPLATE = "{id}-{user:.10}-{taker:.10}"
+
 PERMS_TEMPLATE = """This bot requires following perms for {}:
 {}
 
 Please correct permissions or choose another channel.
-"""
-NAME_TEMPLATE = "{id}-{user:.10}-{taker:.10}"
-TICKET_WELCOME = """This is a __private__ ticket. Please follow all server and support guidelines.
-It is logged and the log will be made available to user if requested.
-If there are any issues please ping staff.
-
-To close the ticket: `{prefix}ticket close A reason goes here.`
-To rename the ticket: `{prefix}ticket A new name for ticket`
-    Names of tickets should be < 100 characters and stick to spaces, letters, numbers and '-'.
 """
 TRANSCRIPT_HEADER = """Transcript of ticket {name} opened by {author}.
 Opened on: {start}
@@ -53,16 +52,6 @@ Closed on: {end}
 TRANSCRIPT_ENTRY = """{date} {author} ({id})
 {msg}
 -----------------------------
-"""
-QUESTIONS = (
-    "Could you briefly describe the topic? If you wish it to remain private, type no.",
-    "What type of support you would like? For example: sympathy, distraction, advice, personal venting, etc ...",
-    "How long you would like to be supported for?",
-)
-REQUEST_PING = """Requesting support for '{user}', please respond {role}.
-{q_text}
-
-Please react to this message to take this ticket.
 """
 LOG_TEMPLATE = """__Action__: {action}
 __User__: {user}
@@ -79,6 +68,20 @@ Please answer my questions one at a time and then we'll get you some help.
 
 Do you need NSFW support? This would be for any adult topics or triggers as described in {chan} .
 Please react below with {check} for NSFW or {cross} for regular support.
+"""
+REQUEST_PING = """Requesting support for '{user}', please respond {role}.
+{q_text}
+
+Please react to this message to take this ticket.
+"""
+TICKET_WELCOME = """{mention}
+This is a __private__ ticket. Please follow all server and support guidelines.
+It is logged and the log will be made available to user if requested.
+If there are any issues please ping staff.
+
+To close the ticket: `{prefix}ticket close A reason goes here.`
+To rename the ticket: `{prefix}ticket A new name for ticket`
+    Names of tickets should be < 100 characters and stick to spaces, letters, numbers and '-'.
 """
 
 async def bot_shutdown(bot):  # pragma: no cover
@@ -407,7 +410,7 @@ async def ticket_request(client, chan, user, config):
             LOG_TEMPLATE.format(action="Created", user=user.name,
                                 msg="__Responder:__ {}\n__Channel:__ {} | {}".format(responder.name, chan.name, chan.mention)),
         )
-    await ticket_channel.send(TICKET_WELCOME.format(prefix=client.prefix))
+    await ticket_channel.send(TICKET_WELCOME.format(prefix=client.prefix, mention=" ".join((user.mention, responder.mention))))
 
 
 class Ticket(Action):
