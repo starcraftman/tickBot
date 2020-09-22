@@ -84,29 +84,6 @@ To rename the ticket: `{prefix}ticket A new name for ticket`
     Names of tickets should be < 100 characters and stick to spaces, letters, numbers and '-'.
 """
 
-async def bot_shutdown(bot):  # pragma: no cover
-    """
-    Shutdown the bot. Gives background jobs grace window to finish  unless empty.
-    """
-    logging.getLogger(__name__).error('FINAL SHUTDOWN REQUESTED')
-    await bot.logout()
-
-
-def user_info(user):  # pragma: no cover
-    """
-    Trivial message formatter based on user information.
-    """
-    lines = [
-        ['Username', '{}#{}'.format(user.name, user.discriminator)],
-        ['ID', str(user.id)],
-        ['Status', str(user.status)],
-        ['Join Date', str(user.joined_at)],
-        ['All Roles:', str([str(role) for role in user.roles[1:]])],
-        ['Top Role:', str(user.top_role).replace('@', '@ ')],
-    ]
-    return '**' + user.display_name + '**\n' + tick.tbl.wrap_markdown(tick.tbl.format_table(lines))
-
-
 class Action():
     """
     Top level action, contains shared logic.
@@ -280,6 +257,138 @@ class Admin(Action):
             await self.msg.channel.send(resp)
 
 
+class Ticket(Action):
+    """
+    Provide the ticket command.
+    """
+    async def close(self, _, log_channel):
+        """
+        Close a ticket.
+        """
+        try:
+            ticket = tickdb.query.get_ticket(self.session, self.msg.guild.id, channel_id=self.msg.channel.id)
+            user = self.msg.guild.get_member(ticket.user_id)
+        except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as e:
+            raise tick.exc.InvalidCommandArgs("I can only close within ticket channels.") from e
+
+        reason = ' '.join(self.args.reason)
+        resp, fname = '', ''
+        try:
+            resp, msg = await wait_for_user_reaction(
+                self.bot, self.msg.channel, self.msg.author,
+                "Please confirm that you want to close ticket by reacting below.")
+            if not resp:
+                raise asyncio.TimeoutError
+
+            fname = await create_log(msg, os.path.join(tempfile.mkdtemp(), self.msg.channel.name + ".txt"))
+            await log_channel.send(
+                LOG_TEMPLATE.format(action="Close", user=user.name,
+                                    msg="__Reason:__ {}.".format(reason)),
+                files=[discord.File(fp=fname, filename=os.path.basename(fname))]
+            )
+
+            resp, _ = await wait_for_user_reaction(
+                self.bot, self.msg.channel, self.msg.author,
+                "Closing ticket. Do you want a log of this ticket DMed??")
+            if resp:
+                await user.send("The log of your support session. Take care.",
+                                files=[discord.File(fp=fname, filename=os.path.basename(fname))])
+            await self.msg.channel.delete(reason=reason)
+            self.session.delete(ticket)
+        except asyncio.TimeoutError:
+            await self.msg.channel.send("Cancelling request to close ticket.")
+        except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound):
+            await self.msg.channel.send("A critical error found, database record could not be retrieved.")
+        finally:
+            try:
+                shutil.rmtree(os.path.dirname(fname))
+            except (FileNotFoundError, OSError):
+                pass
+
+    async def rename(self, _, log_channel):
+        """
+        Rename a ticket.
+        """
+        try:
+            ticket = tickdb.query.get_ticket(self.session, self.msg.guild.id, channel_id=self.msg.channel.id)
+        except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as e:
+            raise tick.exc.InvalidCommandArgs("I can only rename within ticket channels.")
+
+        new_name = tick.util.clean_input(" ".join(self.args.name)).lower()[:100]
+        if not new_name.startswith("{}-".format(ticket.id)):
+            new_name = "{}-".format(ticket.id) + new_name
+        old_name = self.msg.channel.name
+        await self.msg.channel.edit(reason='New name was requested.', name=new_name)
+        await log_channel.send(
+            LOG_TEMPLATE.format(action="Rename", user=self.msg.author.name,
+                                msg="__Old Name:__ {}\n__New Name:__ {}".format(old_name, new_name)),
+        )
+
+        return 'Rename completed.'
+
+    async def execute(self):
+        try:
+            guild_config = tickdb.query.get_guild_config(self.session, self.msg.guild.id)
+            log_channel = self.msg.guild.get_channel(guild_config.log_channel_id)
+            # If log channel not configured, dev null log messages
+            if not log_channel:
+                log_channel = aiomock.AIOMock()
+                log_channel.send.async_return_value = True
+        except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as e:
+            raise tick.exc.InvalidCommandArgs("Tickets not configured. See `{prefix}admin`".format(prefix=self.bot.prefix)) from e
+
+        func = getattr(self, self.args.subcmd)
+        resp = await func(guild_config, log_channel)
+
+        self.session.commit()
+        if resp:
+            await self.msg.channel.send(resp)
+
+
+class Help(Action):
+    """
+    Provide an overview of help.
+    """
+    async def execute(self):
+        prefix = self.bot.prefix
+        over = [
+            'Here is an overview of my commands.',
+            '',
+            'For more information do: `{}Command -h`'.format(prefix),
+            '       Example: `{}drop -h`'.format(prefix),
+            '',
+        ]
+        lines = [
+            ['Command', 'Effect'],
+            ['{prefix}admin', 'Configure the tickets'],
+            ['{prefix}ticket', 'Manage tickets'],
+            ['{prefix}status', 'Info about this bot'],
+            ['{prefix}help', 'This help message'],
+        ]
+        lines = [[line[0].format(prefix=prefix), line[1]] for line in lines]
+
+        response = '\n'.join(over) + tick.tbl.wrap_markdown(tick.tbl.format_table(lines, header=True))
+        await self.bot.send_ttl_message(self.msg.channel, response)
+        try:
+            await self.msg.delete()
+        except discord.NotFound:
+            pass
+
+
+class Status(Action):
+    """
+    Display the status of this bot.
+    """
+    async def execute(self):
+        lines = [
+            ['Created By', 'GearsandCogs'],
+            ['Uptime', self.bot.uptime],
+            ['Version', '{}'.format(tick.__version__)],
+        ]
+
+        await self.msg.channel.send(tick.tbl.wrap_markdown(tick.tbl.format_table(lines)))
+
+
 class RequestGather():
     """
     A simple object to gather information from the user and reformat it.
@@ -413,138 +522,6 @@ async def ticket_request(client, chan, user, config):
     await ticket_channel.send(TICKET_WELCOME.format(prefix=client.prefix, mention=" ".join((user.mention, responder.mention))))
 
 
-class Ticket(Action):
-    """
-    Provide the ticket command.
-    """
-    async def close(self, _, log_channel):
-        """
-        Close a ticket.
-        """
-        try:
-            ticket = tickdb.query.get_ticket(self.session, self.msg.guild.id, channel_id=self.msg.channel.id)
-            user = self.msg.guild.get_member(ticket.user_id)
-        except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as e:
-            raise tick.exc.InvalidCommandArgs("I can only close within ticket channels.") from e
-
-        reason = ' '.join(self.args.reason)
-        resp, fname = '', ''
-        try:
-            resp, msg = await wait_for_user_reaction(
-                self.bot, self.msg.channel, self.msg.author,
-                "Please confirm that you want to close ticket by reacting below.")
-            if not resp:
-                raise asyncio.TimeoutError
-
-            fname = await create_log(msg, os.path.join(tempfile.mkdtemp(), self.msg.channel.name + ".txt"))
-            await log_channel.send(
-                LOG_TEMPLATE.format(action="Close", user=user.name,
-                                    msg="__Reason:__ {}.".format(reason)),
-                files=[discord.File(fp=fname, filename=os.path.basename(fname))]
-            )
-
-            resp, _ = await wait_for_user_reaction(
-                self.bot, self.msg.channel, self.msg.author,
-                "Closing ticket. Do you want a log of this ticket DMed??")
-            if resp:
-                await user.send("The log of your support session. Take care.",
-                                files=[discord.File(fp=fname, filename=os.path.basename(fname))])
-            await self.msg.channel.delete(reason=reason)
-            self.session.delete(ticket)
-        except asyncio.TimeoutError:
-            await self.msg.channel.send("Cancelling request to close ticket.")
-        except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound):
-            await self.msg.channel.send("A critical error found, database record could not be retrieved.")
-        finally:
-            try:
-                shutil.rmtree(os.path.dirname(fname))
-            except (FileNotFoundError, OSError):
-                pass
-
-    async def rename(self, _, log_channel):
-        """
-        Rename a ticket.
-        """
-        try:
-            ticket = tickdb.query.get_ticket(self.session, self.msg.guild.id, channel_id=self.msg.channel.id)
-        except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as e:
-            raise tick.exc.InvalidCommandArgs("I can only rename within ticket channels.")
-
-        new_name = tick.util.clean_input(" ".join(self.args.name)).lower()[:100]
-        if not new_name.startswith("{}-".format(ticket.id)):
-            new_name = "{}-".format(ticket.id) + new_name
-        old_name = self.msg.channel.name
-        await self.msg.channel.edit(reason='New name was requested.', name=new_name)
-        await log_channel.send(
-            LOG_TEMPLATE.format(action="Rename", user=self.msg.author.name,
-                                msg="__Old Name:__ {}\n__New Name:__ {}".format(old_name, new_name)),
-        )
-
-        return 'Rename completed.'
-
-    async def execute(self):
-        try:
-            guild_config = tickdb.query.get_guild_config(self.session, self.msg.guild.id)
-            log_channel = self.msg.guild.get_channel(guild_config.log_channel_id)
-            # If log channel not configured, dev null log messages
-            if not log_channel:
-                log_channel = aiomock.AIOMock()
-                log_channel.send.async_return_value = True
-        except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as e:
-            raise tick.exc.InvalidCommandArgs("Tickets not configured. See `{prefix}admin`".format(prefix=self.bot.prefix)) from e
-
-        func = getattr(self, self.args.subcmd)
-        resp = await func(guild_config, log_channel)
-
-        self.session.commit()
-        if resp:
-            await self.msg.channel.send(resp)
-
-
-class Help(Action):
-    """
-    Provide an overview of help.
-    """
-    async def execute(self):
-        prefix = self.bot.prefix
-        over = [
-            'Here is an overview of my commands.',
-            '',
-            'For more information do: `{}Command -h`'.format(prefix),
-            '       Example: `{}drop -h`'.format(prefix),
-            '',
-        ]
-        lines = [
-            ['Command', 'Effect'],
-            ['{prefix}admin', 'Configure the tickets'],
-            ['{prefix}ticket', 'Manage tickets'],
-            ['{prefix}status', 'Info about this bot'],
-            ['{prefix}help', 'This help message'],
-        ]
-        lines = [[line[0].format(prefix=prefix), line[1]] for line in lines]
-
-        response = '\n'.join(over) + tick.tbl.wrap_markdown(tick.tbl.format_table(lines, header=True))
-        await self.bot.send_ttl_message(self.msg.channel, response)
-        try:
-            await self.msg.delete()
-        except discord.NotFound:
-            pass
-
-
-class Status(Action):
-    """
-    Display the status of this bot.
-    """
-    async def execute(self):
-        lines = [
-            ['Created By', 'GearsandCogs'],
-            ['Uptime', self.bot.uptime],
-            ['Version', '{}'.format(tick.__version__)],
-        ]
-
-        await self.msg.channel.send(tick.tbl.wrap_markdown(tick.tbl.format_table(lines)))
-
-
 async def create_log(last_msg, fname=None):
     """
     Log a whole channel's history to a file for preservation.
@@ -606,3 +583,26 @@ async def wait_for_user_reaction(client, chan, author, text, *, yes=YES_EMOJI, n
     react, _ = await client.wait_for('reaction_add', check=check, timeout=TICKET_TIMEOUT)
 
     return str(react) == yes, msg
+
+
+async def bot_shutdown(bot):  # pragma: no cover
+    """
+    Shutdown the bot. Gives background jobs grace window to finish  unless empty.
+    """
+    logging.getLogger(__name__).error('FINAL SHUTDOWN REQUESTED')
+    await bot.logout()
+
+
+def user_info(user):  # pragma: no cover
+    """
+    Trivial message formatter based on user information.
+    """
+    lines = [
+        ['Username', '{}#{}'.format(user.name, user.discriminator)],
+        ['ID', str(user.id)],
+        ['Status', str(user.status)],
+        ['Join Date', str(user.joined_at)],
+        ['All Roles:', str([str(role) for role in user.roles[1:]])],
+        ['Top Role:', str(user.top_role).replace('@', '@ ')],
+    ]
+    return '**' + user.display_name + '**\n' + tick.tbl.wrap_markdown(tick.tbl.format_table(lines))
