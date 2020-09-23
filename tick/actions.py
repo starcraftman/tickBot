@@ -58,10 +58,10 @@ __User__: {user}
 {msg}
 """
 TICKET_REQUEST_INFO = """
-To request a ticket react to this text by clicking the checkmark reaction.
+To request a ticket click on the existing reaction below.
 
-A ticket is a private impromptu support session in private.
-You will be asked some questions to help narrow things down, please respond in the ticket.
+A ticket is a private support session with a supporter who will try their best to help you.
+You will be asked some questions to help narrow things down, please respond as best you can.
 """
 PREAMBLE = """Hello. I understand you'd like support.
 Please answer my questions one at a time and then we'll get you some help.
@@ -403,6 +403,8 @@ class RequestGather():
     async def get_info(self):
         """
         Allow the user to answer questions and keep the responses.
+
+        Returns: True iff user needs an adult. Default False.
         """
         sent = []
         server_rules = discord.utils.get(self.chan.guild.channels, name='server-rules')
@@ -431,6 +433,9 @@ class RequestGather():
     def format(self, roles):
         """
         Returns a formatted message to summarize request.
+
+        Args:
+            roles: The roles to mention in the message.
         """
         role_msg = " ".join([x.mention for x in roles])
         q_text = ''
@@ -459,9 +464,9 @@ async def ticket_request(client, chan, user, config):
     guild = chan.guild
 
     gather = RequestGather(client, chan, user)
-    roles = [guild.get_role(config.role_id)]
-    if await gather.get_info() and config.adult_role_id:
-        roles += [guild.get_role(config.adult_role_id)]
+    roles = [guild.get_role(config.adult_role_id)]
+    if not await gather.get_info() and config.role_id:
+        roles = [guild.get_role(config.role_id)]
 
     log_channel = guild.get_channel(config.log_channel_id)
     if log_channel:
