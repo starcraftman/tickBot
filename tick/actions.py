@@ -67,12 +67,15 @@ PREAMBLE = """Hello. I understand you'd like support.
 Please answer my questions one at a time and then we'll get you some help.
 
 Do you need NSFW support? This would be for any adult topics or triggers as described in {chan} .
-Please react below with {check} for NSFW or {cross} for regular support.
+Please react below with {yes} for NSFW or {no} for regular support.
 """
-REQUEST_PING = """Requesting support for '{user}', please respond {role}.
+REQUEST_PING = """Requesting support for "**{user}**", please respond {role}.
 {q_text}
 
-Please react to this message to take this ticket.
+React with {yes} to take this ticket.
+Requesting user or "{admin_role}" may react with {no} to cancel request.
+
+Note: If nobody responds, please reping roles at most every 10 minutes or cancel request.
 """
 TICKET_WELCOME = """{mention}
 This is a __private__ ticket. Please follow all server and support guidelines.
@@ -409,7 +412,8 @@ class RequestGather():
         sent = []
         server_rules = discord.utils.get(self.chan.guild.channels, name='server-rules')
         adult_needed, msg = await wait_for_user_reaction(
-            self.bot, self.chan, self.author, PREAMBLE.format(chan=server_rules.mention, check=YES_EMOJI, cross=NO_EMOJI))
+            self.bot, self.chan, self.author,
+            PREAMBLE.format(chan=server_rules.mention, yes=YES_EMOJI, no=NO_EMOJI))
         sent += [msg]
 
         try:
@@ -439,11 +443,12 @@ class RequestGather():
         """
         role_msg = " ".join([x.mention for x in roles])
         q_text = ''
-        for question, response in zip(self.questions, self.responses):
-            q_text += "\n{}\n    {}".format(question, response)
+        for ind, (question, response) in enumerate(zip(self.questions, self.responses)):
+            q_text += "\n**{{}) }**\n    {}".format(ind, question, response)
 
         return REQUEST_PING.format(user=self.author.name, role=role_msg,
-                                   prefix=self.bot.prefix, q_text=q_text)
+                                   prefix=self.bot.prefix, q_text=q_text,
+                                   admin_role=ADMIN_ROLE, yes=YES_EMOJI, no=NO_EMOJI)
 
 
 async def ticket_request(client, chan, user, config):
@@ -476,16 +481,31 @@ async def ticket_request(client, chan, user, config):
         )
     sent = await chan.send(gather.format(roles))
     await sent.add_reaction(YES_EMOJI)
+    await sent.add_reaction(NO_EMOJI)
 
     def check(c_react, c_user):
-        can_respond = False
+        """
+        A ticket can be cancelled by original user or ADMIN_ROLE.
+        A ticket can only be taken by one of the selected roles.
+        """
+        can_respond, can_cancel = False, c_user == user
         for role in c_user.roles:
             if role in roles:
                 can_respond = True
+            if role.name == ADMIN_ROLE:
+                can_cancel = True
 
-        return can_respond and str(c_react) == YES_EMOJI
-    _, responder = await client.wait_for('reaction_add', check=check, timeout=TICKET_TIMEOUT)
+        response = ((can_respond and str(c_react) == YES_EMOJI)
+                    or (can_cancel and str(c_react) == NO_EMOJI))
+        if not response:
+            asyncio.ensure_future(c_react.remove(c_user))
+
+        return response
+
+    reaction, responder = await client.wait_for('reaction_add', check=check)
     await sent.delete()
+    if str(reaction) == NO_EMOJI:
+        return
 
     ticket = tickdb.schema.Ticket(user_id=user.id, supporter_id=responder.id, guild_id=guild.id)
     session = tickdb.Session()

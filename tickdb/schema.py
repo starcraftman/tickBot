@@ -28,7 +28,8 @@ class GuildConfig(Base):
     adult_role_id = sqla.Column(sqla.BigInteger)
 
     def __repr__(self):
-        keys = ['id', 'support_channel_id', 'category_channel_id', 'log_channel_id', 'role_id']
+        keys = ['id', 'support_channel_id', 'category_channel_id', 'log_channel_id',
+                'role_id', 'adult_role_id']
         kwargs = ['{}={!r}'.format(key, getattr(self, key)) for key in keys]
 
         return "GuildConfig({})".format(', '.join(kwargs))
