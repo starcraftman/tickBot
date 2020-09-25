@@ -87,6 +87,11 @@ To close the ticket: `{prefix}ticket close A reason goes here.`
 To rename the ticket: `{prefix}ticket A new name for ticket`
     Names of tickets should be < 100 characters and stick to spaces, letters, numbers and '-'.
 """
+SUPPORT_PIN_NOTICE = """
+Tickets can now be started by reacting to the above pin.
+If it is ever deleted simply rerun this command.
+I hope all goes well.
+"""
 
 
 class Action():
@@ -207,7 +212,14 @@ class Admin(Action):
 
         guild_config.support_channel_id = sent.channel.id
         guild_config.support_pin_id = sent.id
-        return "Tickets can now be started by reacting to pinned message.\nIf you delete it just run support command again."
+
+        await asyncio.sleep(2)
+        to_delete = []
+        async for msg in channel.history(limit=10):
+            if msg.type == discord.MessageType.pins_add:
+                to_delete += [msg]
+        await channel.delete_messages(to_delete)
+        await self.bot.send_ttl_message(channel, SUPPORT_PIN_NOTICE)
 
     async def role(self, guild_config):
         """
