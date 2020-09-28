@@ -219,7 +219,7 @@ class Admin(Action):
             if msg.type == discord.MessageType.pins_add:
                 to_delete += [msg]
         await channel.delete_messages(to_delete)
-        await self.bot.send_ttl_message(channel, SUPPORT_PIN_NOTICE)
+        await self.bot.send_ttl_message(channel, SUPPORT_PIN_NOTICE, ttl=5)
 
     async def role(self, guild_config):
         """
@@ -502,7 +502,7 @@ async def ticket_request(client, chan, user, config):
         A ticket can be cancelled by original user or ADMIN_ROLE.
         A ticket can only be taken by one of the selected roles.
         """
-        if c_user == client.user:
+        if c_user == client.user or c_react.message.id != sent.id:
             return False
 
         can_respond, can_cancel = False, c_user == user

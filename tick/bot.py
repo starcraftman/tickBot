@@ -160,11 +160,16 @@ class TickBot(discord.Client):
                 return
 
             config = tickdb.query.get_guild_config(tickdb.Session(), chan.guild.id)
+            start_request = False
             if config.support_pin_id and msg.id == config.support_pin_id:
                 for reaction in msg.reactions:
-                    if str(reaction.emoji) == tick.actions.PIN_EMOJI:
+                    if str(reaction) == tick.actions.PIN_EMOJI and reaction.count > 1:
                         await reaction.remove(payload.member)
+                        start_request = True
+                    elif str(reaction) != tick.actions.PIN_EMOJI:
+                        await reaction.clear()
 
+            if start_request:
                 await tick.actions.ticket_request(self, chan, payload.member, config)
         except sqlalchemy.orm.exc.NoResultFound:
             pass
