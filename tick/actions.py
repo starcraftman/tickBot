@@ -26,6 +26,7 @@ TICKET_TIMEOUT = tick.util.get_config('ticket', 'timeout')
 PIN_EMOJI = tick.util.get_config('emojis', 'pin')
 YES_EMOJI = tick.util.get_config('emojis', '_yes')
 NO_EMOJI = tick.util.get_config('emojis', '_no')
+U18_EMOJI = tick.util.get_config('emojis', 'u18')
 ADMIN_ROLE = tick.util.get_config('ticket', 'admin_role')
 
 LOG_PERMS = discord.Permissions(read_messages=True, send_messages=True, attach_files=True)
@@ -66,9 +67,10 @@ Please be patient once a ping is made, response time varies depending on availab
 """
 PREAMBLE = """Hello. I understand you'd like support.
 Please answer my questions one at a time and then we'll get you some help.
+When answering my questions by text, type **Cancel** in response to terminate the request.
 
 Do you need NSFW support? This would be for any adult topics or triggers as described in {chan} .
-Please react below with {yes} for NSFW or {no} for regular support.
+Please react below with {u18} for NSFW, {yes} for regular support or {no} to cancel this request.
 """
 REQUEST_PING = """Requesting support for "**{user}**", please respond {role}.
 {q_text}
@@ -417,20 +419,49 @@ class RequestGather():
         self.questions = QUESTIONS
         self.responses = []
 
-    async def get_info(self):
+    async def needs_adult(self):
+        """
+        Check if adult needed.
+
+        Returns: (msg, adult_needed)
+            msg: The message sent to user.
+            adult_needed: A boolean. If None then user opted to cancel request.
+        """
+        server_rules = discord.utils.get(self.chan.guild.channels, name='server-rules')
+        text = PREAMBLE.format(chan=server_rules.mention, yes=YES_EMOJI, no=NO_EMOJI, u18=U18_EMOJI)
+
+        msg = await self.chan.send(text)
+        await msg.add_reaction(U18_EMOJI)
+        await msg.add_reaction(YES_EMOJI)
+        await msg.add_reaction(NO_EMOJI)
+
+        def check(c_react, c_user):
+            return c_user == self.author and str(c_react) in (YES_EMOJI, NO_EMOJI, U18_EMOJI)
+
+        react, _ = await self.bot.wait_for('reaction_add', check=check, timeout=TICKET_TIMEOUT)
+        adult_needed = str(react) == U18_EMOJI
+        if str(react) == NO_EMOJI:
+            adult_needed = None
+
+        return msg, adult_needed
+
+    async def ask_questions(self):
         """
         Allow the user to answer questions and keep the responses.
 
         Returns: True iff user needs an adult. Default False.
+
+        Raises:
+            InvalidCommandArgs: User opted to cancel before finishing.
         """
         sent = []
-        server_rules = discord.utils.get(self.chan.guild.channels, name='server-rules')
-        adult_needed, msg = await wait_for_user_reaction(
-            self.bot, self.chan, self.author,
-            PREAMBLE.format(chan=server_rules.mention, yes=YES_EMOJI, no=NO_EMOJI))
-        sent += [msg]
 
         try:
+            msg, adult_needed = await self.needs_adult()
+            sent += [msg]
+            if adult_needed is None:
+                raise tick.exc.InvalidCommandArgs("This request has been cancelled.")
+
             for ind, question in enumerate(self.questions, start=1):
                 sent += [await self.chan.send("{}) {}".format(ind, question))]
                 resp = await self.bot.wait_for(
@@ -440,6 +471,8 @@ class RequestGather():
                 )
                 sent += [resp]
                 self.responses += [resp.content]
+                if resp.content == "Cancel":
+                    raise tick.exc.InvalidCommandArgs("This request has been cancelled.")
         except asyncio.TimeoutError as e:
             raise tick.exc.InvalidCommandArgs("User failed to respond in time. Cancelling request.") from e
         finally:
@@ -484,7 +517,7 @@ async def ticket_request(client, chan, user, config):
 
     gather = RequestGather(client, chan, user)
     roles = [guild.get_role(config.adult_role_id)]
-    if not await gather.get_info() and config.role_id:
+    if not await gather.ask_questions() and config.role_id:
         roles = [guild.get_role(config.role_id)]
 
     log_channel = guild.get_channel(config.log_channel_id)

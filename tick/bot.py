@@ -175,6 +175,8 @@ class TickBot(discord.Client):
             pass
         except discord.errors.NotFound:
             pass
+        except tick.exc.UserException as exc:
+            await self.send_ttl_message(chan, exc.reply(), ttl=10)
 
     async def on_ready(self):
         """
