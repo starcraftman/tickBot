@@ -88,6 +88,7 @@ If there are any issues please ping staff.
 To close the ticket: `{prefix}ticket close A reason goes here.`
 To rename the ticket: `{prefix}ticket A new name for ticket`
     Names of tickets should be < 100 characters and stick to spaces, letters, numbers and '-'.
+To get a new supporter (if they must go): `{prefix}ticket swap
 """
 SUPPORT_PIN_NOTICE = """
 Tickets can now be started by reacting to the above pin.
@@ -331,7 +332,7 @@ class Ticket(Action):
         try:
             ticket = tickdb.query.get_ticket(self.session, self.msg.guild.id, channel_id=self.msg.channel.id)
         except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as e:
-            raise tick.exc.InvalidCommandArgs("I can only rename within ticket channels.")
+            raise tick.exc.InvalidCommandArgs("I can only rename within ticket channels.") from e
 
         new_name = tick.util.clean_input(" ".join(self.args.name)).lower()[:100]
         if not new_name.startswith("{}-".format(ticket.id)):
@@ -344,6 +345,46 @@ class Ticket(Action):
         )
 
         return 'Rename completed.'
+
+    async def swap(self, guild_config, log_channel):
+        """
+        Swap the supporter for a ticket.
+        """
+        try:
+            ticket = tickdb.query.get_ticket(self.session, self.msg.guild.id, channel_id=self.msg.channel.id)
+        except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as e:
+            raise tick.exc.InvalidCommandArgs("I can only swap supporters in ticket channels.") from e
+        guild = self.msg.guild
+        roles = (guild.get_role(guild_config.adult_role_id), guild.get_role(guild_config.role_id))
+        support_channel = guild.get_channel(guild_config.support_channel_id)
+        user = self.bot.get_user(ticket.user_id)
+
+        sent = await support_channel.send(ticket.request_msg)
+        await sent.add_reaction(YES_EMOJI)
+        await sent.add_reaction(NO_EMOJI)
+        reaction, responder = await self.bot.wait_for(
+            'reaction_add',
+            check=request_check_factory(client=self.bot, sent=sent, user=user, roles=roles)
+        )
+        await sent.delete()
+        if str(reaction) == NO_EMOJI:
+            return
+
+        overwrites = self.msg.channel.overwrites
+        overwrites[responder] = discord.PermissionOverwrite(
+            read_messages=True, send_messages=True, read_message_history=True,
+            add_reactions=True
+        )
+        await self.msg.channel.edit(reason="New responder was requested.", overwrites=overwrites)
+        old_responder = self.bot.get_user(ticket.supporter_id)
+        ticket.supporter_id = responder.id
+
+        await log_channel.send(
+            LOG_TEMPLATE.format(action="Swap", user=self.msg.author.name,
+                                msg="__Old Responder:__ {}\n__New Responder:__ {}".format(old_responder.name, responder.name)),
+        )
+
+        return 'Hope your new responder {} can help. Take care!'.format(responder.mention)
 
     async def execute(self):
         try:
@@ -418,6 +459,12 @@ class RequestGather():
         self.author = author
         self.questions = QUESTIONS
         self.responses = []
+
+    def __repr__(self):
+        keys = ['chan', 'author', 'questions', 'responses']
+        kwargs = ['{}={!r}'.format(key, getattr(self, key)) for key in keys]
+
+        return "{}({})".format(self.__class__.__name__, ', '.join(kwargs))
 
     async def needs_adult(self):
         """
@@ -498,6 +545,45 @@ class RequestGather():
                                    admin_role=ADMIN_ROLE, yes=YES_EMOJI, no=NO_EMOJI)
 
 
+def request_check_factory(*, client, sent, user, roles):
+    """
+    Generate a check function for a response to a request for help by a user.
+    Use this function to check on a reaction to a message.
+
+    Kwargs:
+        client: A reference to the client.
+        sent: The request message sent to user.
+        user: The user sending the request.
+        roles: Roles that are allowed to respond.
+
+    Returns:
+        A function that takes a (reaction, user) and performs the boolean check.kj:w
+    """
+    def request_check(c_react, c_user):
+        """
+        A ticket can be cancelled by original user or ADMIN_ROLE.
+        A ticket can only be taken by one of the selected roles.
+        """
+        if c_user == client.user or c_react.message.id != sent.id:
+            return False
+
+        can_respond, can_cancel = False, c_user == user
+        for role in c_user.roles:
+            if role in roles:
+                can_respond = True
+            if role.name == ADMIN_ROLE:
+                can_cancel = True
+
+        response = ((can_respond and str(c_react) == YES_EMOJI)
+                    or (can_cancel and str(c_react) == NO_EMOJI))
+        if not response:
+            asyncio.ensure_future(c_react.remove(c_user))
+
+        return response
+
+    return request_check
+
+
 async def ticket_request(client, chan, user, config):
     """
     Request a private ticket on the server. Engages in several steps to complete.
@@ -529,35 +615,17 @@ async def ticket_request(client, chan, user, config):
     sent = await chan.send(gather.format(roles))
     await sent.add_reaction(YES_EMOJI)
     await sent.add_reaction(NO_EMOJI)
+    reaction, responder = await client.wait_for(
+        'reaction_add',
+        check=request_check_factory(client=client, sent=sent, user=user, roles=roles)
+    )
 
-    def check(c_react, c_user):
-        """
-        A ticket can be cancelled by original user or ADMIN_ROLE.
-        A ticket can only be taken by one of the selected roles.
-        """
-        if c_user == client.user or c_react.message.id != sent.id:
-            return False
-
-        can_respond, can_cancel = False, c_user == user
-        for role in c_user.roles:
-            if role in roles:
-                can_respond = True
-            if role.name == ADMIN_ROLE:
-                can_cancel = True
-
-        response = ((can_respond and str(c_react) == YES_EMOJI)
-                    or (can_cancel and str(c_react) == NO_EMOJI))
-        if not response:
-            asyncio.ensure_future(c_react.remove(c_user))
-
-        return response
-
-    reaction, responder = await client.wait_for('reaction_add', check=check)
     await sent.delete()
     if str(reaction) == NO_EMOJI:
         return
 
-    ticket = tickdb.schema.Ticket(user_id=user.id, supporter_id=responder.id, guild_id=guild.id)
+    ticket = tickdb.schema.Ticket(user_id=user.id, supporter_id=responder.id,
+                                  guild_id=guild.id, request_msg=gather.format(roles))
     session = tickdb.Session()
     session.add(ticket)
     session.flush()
@@ -568,6 +636,7 @@ async def ticket_request(client, chan, user, config):
                                               send_messages=True,
                                               manage_messages=True,
                                               manage_channels=True,
+                                              manage_permissions=True,
                                               read_message_history=True,
                                               add_reactions=True),
         user: discord.PermissionOverwrite(read_messages=True,
@@ -594,7 +663,9 @@ async def ticket_request(client, chan, user, config):
             LOG_TEMPLATE.format(action="Created", user=user.name,
                                 msg="__Responder:__ {}\n__Channel:__ {} | {}".format(responder.name, chan.name, chan.mention)),
         )
-    await ticket_channel.send(TICKET_WELCOME.format(prefix=client.prefix, mention=" ".join((user.mention, responder.mention))))
+    msg = await ticket_channel.send(TICKET_WELCOME.format(
+        prefix=client.prefix, mention=" ".join((user.mention, responder.mention))))
+    await msg.pin()
 
 
 async def create_log(last_msg, fname=None):

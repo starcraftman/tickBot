@@ -10,6 +10,7 @@ import tickdb
 
 
 LEN_NAME = 100
+LEN_REQUEST = 2500
 Base = sqlalchemy.ext.declarative.declarative_base()
 
 
@@ -32,10 +33,10 @@ class GuildConfig(Base):
                 'role_id', 'adult_role_id']
         kwargs = ['{}={!r}'.format(key, getattr(self, key)) for key in keys]
 
-        return "GuildConfig({})".format(', '.join(kwargs))
+        return "{}({})".format(self.__class__.__name__, ', '.join(kwargs))
 
     def __eq__(self, other):
-        return isinstance(other, GuildConfig) and self.name == other.name
+        return isinstance(other, GuildConfig) and self.id == other.id
 
 
 class Ticket(Base):
@@ -49,6 +50,7 @@ class Ticket(Base):
     supporter_id = sqla.Column(sqla.BigInteger)
     channel_id = sqla.Column(sqla.BigInteger)
     guild_id = sqla.Column(sqla.BigInteger, sqla.ForeignKey('configs.id'))
+    request_msg = sqla.Column(sqla.String(LEN_REQUEST), default="")
     created_at = sqla.Column(sqla.DateTime, server_default=sqla.func.now())
     updated_at = sqla.Column(sqla.DateTime, onupdate=sqla.func.now())
 
@@ -56,7 +58,7 @@ class Ticket(Base):
         keys = ['user_id', 'supporter_id', 'channel_id', 'guild_id', 'created_at', 'updated_at']
         kwargs = ['{}={!r}'.format(key, getattr(self, key)) for key in keys]
 
-        return "Ticket({})".format(', '.join(kwargs))
+        return "{}({})".format(self.__class__.__name__, ', '.join(kwargs))
 
     def __str__(self):
         """

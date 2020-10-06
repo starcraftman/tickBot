@@ -64,6 +64,8 @@ def subs_admin(subs, prefix):
         Set bot to log finished tickets to this channel for upload.
 {prefix}ticket role @role
         Set bot to ping mentioned role for tickets.
+{prefix}ticket adult_role @role
+        Set bot to ping mentioned adult_role for tickets when an adult needed.
 {prefix}ticket support #mention-support-channel
         Set bot to monitor this channel for support requests.
     """.format(prefix=prefix)
@@ -85,26 +87,23 @@ def subs_ticket(subs, prefix):
     """ Subcommand parsing for admin """
     desc = """Ticket command.
 
-{prefix}ticket request
-        Create a ticket.
-{prefix}ticket take @user
-        Take a ticket created by another user.
 {prefix}ticket close A reason to close ticket.
         Close a ticket.
 {prefix}ticket rename a-new-name
         Rename an existing ticket from inside the channel.
+{prefix}ticket swap
+        The existing responder has to go, will reping for a new one.
     """.format(prefix=prefix)
     sub = subs.add_parser(prefix + 'ticket', description=desc, formatter_class=RawHelp)
     sub.set_defaults(cmd='Ticket')
     tick_subs = sub.add_subparsers(title='subcommands',
                                    description='Ticket subcommands', dest='subcmd')
 
-    tick_sub = tick_subs.add_parser('request', help='Create a new ticket.')
-    tick_sub = tick_subs.add_parser('take', help='Take a ticket.')
     tick_sub = tick_subs.add_parser('close', help='Close a ticket.')
     tick_sub.add_argument('reason', nargs='+', help='The name of the ticket.')
     tick_sub = tick_subs.add_parser('rename', help='ate a new ticket.')
     tick_sub.add_argument('name', nargs='+', help='The name of the ticket.')
+    tick_sub = tick_subs.add_parser('swap', help='Get a new responder.')
 
 
 @register_parser
