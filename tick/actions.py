@@ -88,7 +88,7 @@ If there are any issues please ping staff.
 To close the ticket: `{prefix}ticket close A reason goes here.`
 To rename the ticket: `{prefix}ticket A new name for ticket`
     Names of tickets should be < 100 characters and stick to spaces, letters, numbers and '-'.
-To get a new supporter (if they must go): `{prefix}ticket swap
+To get a new supporter (if they must go): `{prefix}ticket swap`
 """
 SUPPORT_PIN_NOTICE = """
 Tickets can now be started by reacting to the above pin.
