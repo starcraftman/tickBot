@@ -569,7 +569,7 @@ def request_check_factory(*, client, sent, user, roles):
 
         can_respond, can_cancel = False, c_user == user
         for role in c_user.roles:
-            if role in roles:
+            if role in roles and c_user != user:
                 can_respond = True
             if role.name == ADMIN_ROLE:
                 can_cancel = True
