@@ -21,8 +21,8 @@ import tickdb
 import tickdb.query
 import tickdb.schema
 
-
-TICKET_TIMEOUT = tick.util.get_config('ticket', 'timeout')
+REQUEST_TIMEOUT = tick.util.get_config('ticket', 'request_timeout')
+RESPONSE_TIMEOUT = tick.util.get_config('ticket', 'response_timeout')
 PIN_EMOJI = tick.util.get_config('emojis', 'pin')
 YES_EMOJI = tick.util.get_config('emojis', '_yes')
 NO_EMOJI = tick.util.get_config('emojis', '_no')
@@ -459,6 +459,7 @@ class RequestGather():
         self.author = author
         self.questions = QUESTIONS
         self.responses = []
+        self.sent = []
 
     def __repr__(self):
         keys = ['chan', 'author', 'questions', 'responses']
@@ -470,9 +471,11 @@ class RequestGather():
         """
         Check if adult needed.
 
-        Returns: (msg, adult_needed)
-            msg: The message sent to user.
+        Returns:
             adult_needed: A boolean. If None then user opted to cancel request.
+
+        Raises:
+            asyncio.TimeoutError - Timeout from user to respond to prompt.
         """
         server_rules = discord.utils.get(self.chan.guild.channels, name='server-rules')
         text = PREAMBLE.format(chan=server_rules.mention, yes=YES_EMOJI, no=NO_EMOJI, u18=U18_EMOJI)
@@ -481,16 +484,17 @@ class RequestGather():
         await msg.add_reaction(U18_EMOJI)
         await msg.add_reaction(YES_EMOJI)
         await msg.add_reaction(NO_EMOJI)
+        self.sent += [msg]
 
         def check(c_react, c_user):
             return c_user == self.author and str(c_react) in (YES_EMOJI, NO_EMOJI, U18_EMOJI)
 
-        react, _ = await self.bot.wait_for('reaction_add', check=check, timeout=TICKET_TIMEOUT)
+        react, _ = await self.bot.wait_for('reaction_add', check=check, timeout=RESPONSE_TIMEOUT)
         adult_needed = str(react) == U18_EMOJI
         if str(react) == NO_EMOJI:
             adult_needed = None
 
-        return msg, adult_needed
+        return adult_needed
 
     async def ask_questions(self):
         """
@@ -501,32 +505,33 @@ class RequestGather():
         Raises:
             InvalidCommandArgs: User opted to cancel before finishing.
         """
-        sent = []
-
         try:
-            msg, adult_needed = await self.needs_adult()
-            sent += [msg]
+            adult_needed = await self.needs_adult()
             if adult_needed is None:
                 raise tick.exc.InvalidCommandArgs("This request has been cancelled.")
 
             for ind, question in enumerate(self.questions, start=1):
-                sent += [await self.chan.send("{}) {}".format(ind, question))]
+                self.sent += [await self.chan.send("{}) {}".format(ind, question))]
                 resp = await self.bot.wait_for(
                     'message',
                     check=lambda m: m.author == self.author and m.channel == self.chan,
-                    timeout=TICKET_TIMEOUT,
+                    timeout=RESPONSE_TIMEOUT,
                 )
-                sent += [resp]
+                self.sent += [resp]
                 self.responses += [resp.content]
                 if resp.content == "Cancel":
                     raise tick.exc.InvalidCommandArgs("This request has been cancelled.")
         except asyncio.TimeoutError as e:
             raise tick.exc.InvalidCommandArgs("User failed to respond in time. Cancelling request.") from e
         finally:
-            if sent:
-                await self.chan.delete_messages(sent)
+            await self.delete_messages()
 
         return adult_needed
+
+    async def delete_messages(self):
+        """ Simply clean up messages exchanged. """
+        if self.sent:
+            await self.chan.delete_messages(self.sent)
 
     def format(self, roles):
         """
@@ -602,8 +607,15 @@ async def ticket_request(client, chan, user, config):
     guild = chan.guild
 
     gather = RequestGather(client, chan, user)
+    try:
+        needs_adult = await asyncio.wait_for(gather.ask_questions(), REQUEST_TIMEOUT)
+    except asyncio.TimeoutError:
+        await client.send_ttl_message("User took longer than 1 hour to respond. Closing ticket.")
+        asyncio.ensure_future(gather.delete_messages())
+        return
+
     roles = [guild.get_role(config.adult_role_id)]
-    if not await gather.ask_questions() and config.role_id:
+    if not needs_adult and config.role_id:
         roles = [guild.get_role(config.role_id)]
 
     log_channel = guild.get_channel(config.log_channel_id)
@@ -717,6 +729,9 @@ async def wait_for_user_reaction(client, chan, author, text, *, yes=YES_EMOJI, n
 
     Returns: (Boolean, msg_sent)
         True if user accepted otherwise False.
+
+    Raises:
+        TimeoutError - User didn't react within the timeout.
     """
     msg = await chan.send(text)
 
@@ -726,7 +741,7 @@ async def wait_for_user_reaction(client, chan, author, text, *, yes=YES_EMOJI, n
     def check(react, user):
         return user == author and str(react) in (yes, no)
 
-    react, _ = await client.wait_for('reaction_add', check=check, timeout=TICKET_TIMEOUT)
+    react, _ = await client.wait_for('reaction_add', check=check, timeout=RESPONSE_TIMEOUT)
 
     return str(react) == yes, msg
 

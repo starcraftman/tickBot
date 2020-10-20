@@ -89,9 +89,9 @@ def f_guild_configs(session):
     """
     configs = (
         GuildConfig(id=1111, support_channel_id=1, category_channel_id=10, log_channel_id=2,
-                    role_id=3),
+                    role_id=3, adult_role_id=8),
         GuildConfig(id=3333, support_channel_id=9, category_channel_id=90, log_channel_id=18,
-                    role_id=27),
+                    role_id=27, adult_role_id=8),
     )
     session.add_all(configs)
     session.commit()
