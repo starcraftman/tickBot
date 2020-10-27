@@ -33,7 +33,7 @@ if 'pytest' in sys.modules:
     CREDS['db'] = 'test_tick'
     TEST_DB = True
 
-engine = sqlalchemy.create_engine(MYSQL_SPEC.format(**CREDS), echo=False, pool_recycle=3600)
+engine = sqlalchemy.create_engine(MYSQL_SPEC.format(**CREDS), echo=False, pool_recycle=-1, pool_size=15)
 Session = sqlalchemy.orm.sessionmaker(bind=engine)
 logging.getLogger(__name__).info('Main Engine Selected: %s', engine)
 
