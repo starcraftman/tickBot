@@ -154,26 +154,27 @@ class TickBot(discord.Client):
         """
         try:
             chan = self.get_channel(payload.channel_id)
-            msg = await chan.fetch_message(payload.message_id)
-
             if isinstance(chan, discord.DMChannel) or payload.member == self.user:
                 return
 
             config = tickdb.query.get_guild_config(tickdb.Session(), chan.guild.id)
-            start_request = False
-            if config.support_pin_id and msg.id == config.support_pin_id:
+            coro = None
+            msg = await chan.fetch_message(payload.message_id)
+
+            if ((config.support_pin_id and msg.id == config.support_pin_id)
+                    or (config.practice_pin_id and msg.id == config.practice_pin_id)):
                 for reaction in msg.reactions:
                     if str(reaction) == tick.actions.PIN_EMOJI and reaction.count > 1:
                         await reaction.remove(payload.member)
-                        start_request = True
+                        if msg.id == config.support_pin_id:
+                            coro = tick.actions.ticket_request(self, chan, payload.member, config)
+                        elif msg.id == config.support_pin_id:
+                            coro = tick.actions.practice_ticket_request(self, chan, payload.member, config)
                     elif str(reaction) != tick.actions.PIN_EMOJI:
                         await reaction.clear()
-
-            if start_request:
-                await tick.actions.ticket_request(self, chan, payload.member, config)
-        except sqlalchemy.orm.exc.NoResultFound:
-            pass
-        except discord.errors.NotFound:
+            if coro:
+                await coro
+        except (sqlalchemy.orm.exc.NoResultFound, discord.errors.NotFound):
             pass
         except tick.exc.UserException as exc:
             await self.send_ttl_message(chan, exc.reply(), ttl=10)

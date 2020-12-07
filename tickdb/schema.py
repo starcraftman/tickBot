@@ -27,10 +27,15 @@ class GuildConfig(Base):
     log_channel_id = sqla.Column(sqla.BigInteger)
     role_id = sqla.Column(sqla.BigInteger)
     adult_role_id = sqla.Column(sqla.BigInteger)
+    # All for separate practice logic.
+    practice_channel_id = sqla.Column(sqla.BigInteger)
+    practice_role_id = sqla.Column(sqla.BigInteger)
+    practice_pin_id = sqla.Column(sqla.BigInteger)
 
     def __repr__(self):
         keys = ['id', 'support_channel_id', 'category_channel_id', 'log_channel_id',
-                'role_id', 'adult_role_id']
+                'role_id', 'adult_role_id', 'practice_channel_id', 'practice_role_id',
+                'practice_pin_id']
         kwargs = ['{}={!r}'.format(key, getattr(self, key)) for key in keys]
 
         return "{}({})".format(self.__class__.__name__, ', '.join(kwargs))

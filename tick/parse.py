@@ -80,6 +80,9 @@ def subs_admin(subs, prefix):
     tick_sub = tick_subs.add_parser('role', help='The role to ping for tickets.')
     tick_sub = tick_subs.add_parser('adult_role', help='The role to ping for adult tickets.')
     tick_sub = tick_subs.add_parser('support', help='Respond to support in mentioned channel.')
+    tick_sub = tick_subs.add_parser('practice_role', help='The role to ping for practice.')
+    tick_sub = tick_subs.add_parser('practice_support', help='The channel to start a practice session')
+    tick_sub = tick_subs.add_parser('summary', help='Show the current configuration.')
 
 
 @register_parser
