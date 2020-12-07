@@ -460,6 +460,7 @@ class RequestGather():
         self.questions = QUESTIONS
         self.responses = []
         self.sent = []
+        self.adult_needed = False
 
     def __repr__(self):
         keys = ['chan', 'author', 'questions', 'responses']
@@ -475,6 +476,7 @@ class RequestGather():
             adult_needed: A boolean. If None then user opted to cancel request.
 
         Raises:
+            asyncio.CancelledError - User opted to cancel the request early.
             asyncio.TimeoutError - Timeout from user to respond to prompt.
         """
         server_rules = discord.utils.get(self.chan.guild.channels, name='server-rules')
@@ -490,11 +492,11 @@ class RequestGather():
             return c_user == self.author and str(c_react) in (YES_EMOJI, NO_EMOJI, U18_EMOJI)
 
         react, _ = await self.bot.wait_for('reaction_add', check=check, timeout=RESPONSE_TIMEOUT)
-        adult_needed = str(react) == U18_EMOJI
+        self.adult_needed = str(react) == U18_EMOJI
         if str(react) == NO_EMOJI:
-            adult_needed = None
+            raise asyncio.CancelledError("User used no emoji.")
 
-        return adult_needed
+        return self.adult_needed
 
     async def ask_questions(self):
         """
@@ -507,8 +509,6 @@ class RequestGather():
         """
         try:
             adult_needed = await self.needs_adult()
-            if adult_needed is None:
-                raise tick.exc.InvalidCommandArgs("This request has been cancelled.")
 
             for ind, question in enumerate(self.questions, start=1):
                 self.sent += [await self.chan.send("{}) {}".format(ind, question))]
@@ -520,9 +520,11 @@ class RequestGather():
                 self.sent += [resp]
                 self.responses += [resp.content]
                 if resp.content == "Cancel":
-                    raise tick.exc.InvalidCommandArgs("This request has been cancelled.")
+                    raise asyncio.CancelledError
+        except asyncio.CancelledError as e:
+            raise tick.exc.InvalidCommandArgs("Request cancelled by user.") from e
         except asyncio.TimeoutError as e:
-            raise tick.exc.InvalidCommandArgs("User failed to respond in time. Cancelling request.") from e
+            raise tick.exc.InvalidCommandArgs("User didn't respond to questions in time. Cancelling request.") from e
         finally:
             await self.delete_messages()
 
@@ -607,16 +609,10 @@ async def ticket_request(client, chan, user, config):
     guild = chan.guild
 
     gather = RequestGather(client, chan, user)
-    try:
-        needs_adult = await asyncio.wait_for(gather.ask_questions(), REQUEST_TIMEOUT)
-    except asyncio.TimeoutError:
-        await client.send_ttl_message("User took longer than 1 hour to respond. Closing ticket.")
-        asyncio.ensure_future(gather.delete_messages())
-        return
-
-    roles = [guild.get_role(config.adult_role_id)]
-    if not needs_adult and config.role_id:
-        roles = [guild.get_role(config.role_id)]
+    await gather.ask_questions()
+    roles = [guild.get_role(config.role_id)]
+    if gather.adult_needed and config.adult_role_id:
+        roles = [guild.get_role(config.adult_role_id)]
 
     log_channel = guild.get_channel(config.log_channel_id)
     if log_channel:
@@ -624,17 +620,31 @@ async def ticket_request(client, chan, user, config):
             LOG_TEMPLATE.format(action="Request", user=user.name,
                                 msg="Request issued, waiting for responder.")
         )
+
     sent = await chan.send(gather.format(roles))
     await sent.add_reaction(YES_EMOJI)
     await sent.add_reaction(NO_EMOJI)
-    reaction, responder = await client.wait_for(
-        'reaction_add',
-        check=request_check_factory(client=client, sent=sent, user=user, roles=roles)
-    )
+    try:
+        reaction, responder = await client.wait_for(
+            'reaction_add',
+            check=request_check_factory(client=client, sent=sent, user=user, roles=roles),
+            timeout=REQUEST_TIMEOUT,
+        )
+    except asyncio.CancelledError:
+        msg = """User cancelled the ticket.
+Request will be closed soon.
 
-    await sent.delete()
-    if str(reaction) == NO_EMOJI:
+{} please consider making a new one if you still need help.""".format(user.mention)
+        await client.send_ttl_message(chan, msg)
+    except asyncio.TimeoutError:
+        msg = """It took longer than {} hour(s) to get a responder.
+Request will be closed soon.
+
+{} please consider making a new one if you still need help.""".format(round(REQUEST_TIMEOUT / 3600.0, 2), user.mention)
+        await client.send_ttl_message(chan, msg)
         return
+    finally:
+        await sent.delete()
 
     ticket = tickdb.schema.Ticket(user_id=user.id, supporter_id=responder.id,
                                   guild_id=guild.id, request_msg=gather.format(roles))
