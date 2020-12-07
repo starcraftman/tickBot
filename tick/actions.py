@@ -38,7 +38,7 @@ QUESTIONS = (
     "What type of support you would like? For example: sympathy, distraction, advice, personal venting, etc ...",
     "How long you would like to be supported for?",
 )
-NAME_TEMPLATE = "{id}-{user:.10}-{taker:.10}"
+NAME_TEMPLATE = "{id}-{user:.5}-{taker:.5}"
 
 PERMS_TEMPLATE = """This bot requires following perms for {}:
 {}
@@ -89,6 +89,35 @@ To close the ticket: `{prefix}ticket close A reason goes here.`
 To rename the ticket: `{prefix}ticket A new name for ticket`
     Names of tickets should be < 100 characters and stick to spaces, letters, numbers and '-'.
 To get a new supporter (if they must go): `{prefix}ticket swap`
+"""
+PRACTICE_TICKET_WELCOME = """{mention}
+This is a **PRACTICE** ticket. Practice responding to an issue.
+At end please manually request a second responder to review and provide feedback.
+
+This is a __private__ ticket. Please follow all server and support guidelines.
+It is logged and the log will be made available to user if requested.
+If there are any issues please ping staff.
+
+To close the ticket: `{prefix}ticket close A reason goes here.`
+To rename the ticket: `{prefix}ticket A new name for ticket`
+    Names of tickets should be < 100 characters and stick to spaces, letters, numbers and '-'.
+To get a new supporter (if they must go): `{prefix}ticket swap`
+To start review of practice: `{prefix}ticket review`
+"""
+PRACTICE_REQUEST = """Requesting practice support for "**{user}**", please respond {role}.
+
+The responder to this ticket will practice a support of the kind requested by the user.
+At the end, initial user will have the session reviewed by a second responder for feedback.
+
+React with {yes} to take this ticket.
+Requesting user or "{admin_role}" may react with {no} to cancel request.
+
+Note: If nobody responds, please reping roles at most every 10 minutes or cancel request.
+"""
+PRACTICE_REVIEW = """{mention} please react to this message to review a practice session.
+
+You should have experience responding to tickets and free time to read session.
+Please provide feedback directly to the requesting user.
 """
 SUPPORT_PIN_NOTICE = """
 Tickets can now be started by reacting to the above pin.
@@ -311,7 +340,7 @@ class Admin(Action):
             'support': getattr(self.msg.guild.get_channel(guild_config.support_channel_id), 'mention', default),
             'category': getattr(self.msg.guild.get_channel(guild_config.category_channel_id), 'mention', default),
             'practice_role': getattr(guild.get_role(guild_config.practice_role_id), 'name', default),
-            'practice_support': getattr(self.msg.guild.get_channel(guild_config.practice_channel_id), 'mention', default),
+            'practice': getattr(self.msg.guild.get_channel(guild_config.practice_channel_id), 'mention', default),
         }
 
         return """
@@ -323,7 +352,7 @@ Adult Role: {adult_role}
 Regular Role: {regular_role}
 
 __Practice__
-Practice Channel: {practice_support}
+Practice Channel: {practice}
 Practice Role: {practice_role}
         """.format(**kwargs)
 
@@ -460,6 +489,49 @@ class Ticket(Action):
         )
 
         return 'Hope your new responder {} can help. Take care!'.format(responder.mention)
+
+    async def review(self, guild_config, log_channel):
+        """
+        Review the events of a ticket by another responder.
+        """
+        try:
+            ticket = tickdb.query.get_ticket(self.session, self.msg.guild.id, channel_id=self.msg.channel.id)
+        except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as e:
+            raise tick.exc.InvalidCommandArgs("I can only review in ticket channels.") from e
+        guild = self.msg.guild
+        roles = (guild.get_role(guild_config.practice_role_id),)
+        support_channel = guild.get_channel(guild_config.support_channel_id)
+        user = self.bot.get_user(ticket.user_id)
+
+        sent = await support_channel.send(PRACTICE_REVIEW.format(mention=roles[-1].mention))
+        await sent.add_reaction(YES_EMOJI)
+        await sent.add_reaction(NO_EMOJI)
+        reaction, responder = await self.bot.wait_for(
+            'reaction_add',
+            check=request_check_factory(client=self.bot, sent=sent, user=user, roles=roles)
+        )
+        await sent.delete()
+        if str(reaction) == NO_EMOJI:
+            return
+
+        overwrites = self.msg.channel.overwrites
+        overwrites[responder] = discord.PermissionOverwrite(
+            read_messages=True, send_messages=True, read_message_history=True,
+            add_reactions=True
+        )
+        await self.msg.channel.edit(reason="Reviewer added to ticket.", overwrites=overwrites)
+        old_responder = self.bot.get_user(ticket.supporter_id)
+        ticket.supporter_id = responder.id
+
+        await log_channel.send(
+            LOG_TEMPLATE.format(action="Reivew", user=self.msg.author.name,
+                                msg="__New Reviewer:__ {}".format(old_responder.name, responder.name)),
+        )
+
+        return """Hello review {}!. Above is a practice ticket session.
+Please read it over and provide feedback to requester who initiated the practice.
+
+Thank you very much.""".format(responder.mention)
 
     async def execute(self):
         try:
@@ -705,12 +777,15 @@ async def ticket_request(client, chan, user, config):
             check=request_check_factory(client=client, sent=sent, user=user, roles=roles),
             timeout=REQUEST_TIMEOUT,
         )
+        if str(reaction) == NO_EMOJI:
+            raise asyncio.CancelledError
     except asyncio.CancelledError:
         msg = """User cancelled the ticket.
 Request will be closed soon.
 
 {} please consider making a new one if you still need help.""".format(user.mention)
         await client.send_ttl_message(chan, msg)
+        return
     except asyncio.TimeoutError:
         msg = """It took longer than {} hour(s) to get a responder.
 Request will be closed soon.
@@ -767,12 +842,7 @@ Request will be closed soon.
 
 async def practice_ticket_request(client, chan, user, config):
     """
-    Request a private ticket on the server. Engages in several steps to complete.
-        - Gather information from user.
-        - Ping required roles to get a response.
-        - Responder reacts to message and must have right roles.
-        - Ticket is created in database and private channel added on server.
-        - Issue welcome message to channel.
+    Request a practice only ticket, otherwise identical to normal ticket.
 
     Args:
         client: An instance of the bot.
@@ -782,38 +852,46 @@ async def practice_ticket_request(client, chan, user, config):
     """
     guild = chan.guild
 
-    gather = RequestGather(client, chan, user)
-    try:
-        needs_adult = await asyncio.wait_for(gather.ask_questions(), REQUEST_TIMEOUT)
-    except asyncio.TimeoutError:
-        await client.send_ttl_message("User took longer than 1 hour to respond. Closing ticket.")
-        asyncio.ensure_future(gather.delete_messages())
-        return
-
-    roles = [guild.get_role(config.adult_role_id)]
-    if not needs_adult and config.role_id:
-        roles = [guild.get_role(config.role_id)]
-
+    role = guild.get_role(config.practice_role_id)
     log_channel = guild.get_channel(config.log_channel_id)
     if log_channel:
         await log_channel.send(
-            LOG_TEMPLATE.format(action="Request", user=user.name,
+            LOG_TEMPLATE.format(action="Practice Request", user=user.name,
                                 msg="Request issued, waiting for responder.")
         )
-    sent = await chan.send(gather.format(roles))
+
+    msg = PRACTICE_REQUEST.format(user=user.name, role=role.mention,
+                                  admin_role=ADMIN_ROLE, yes=YES_EMOJI, no=NO_EMOJI)
+    sent = await chan.send(msg)
     await sent.add_reaction(YES_EMOJI)
     await sent.add_reaction(NO_EMOJI)
-    reaction, responder = await client.wait_for(
-        'reaction_add',
-        check=request_check_factory(client=client, sent=sent, user=user, roles=roles)
-    )
+    try:
+        reaction, responder = await client.wait_for(
+            'reaction_add',
+            check=request_check_factory(client=client, sent=sent, user=user, roles=[role]),
+            timeout=REQUEST_TIMEOUT,
+        )
+        if str(reaction) == NO_EMOJI:
+            raise asyncio.CancelledError
+    except asyncio.CancelledError:
+        msg = """User cancelled the practice ticket.
+Request will be closed soon.
 
-    await sent.delete()
-    if str(reaction) == NO_EMOJI:
+{} please consider making a new one if you still need help.""".format(user.mention)
+        await client.send_ttl_message(chan, msg)
         return
+    except asyncio.TimeoutError:
+        msg = """It took longer than {} hour(s) to get a practice responder.
+Request will be closed soon.
+
+{} please consider making a new one if you still need help.""".format(round(REQUEST_TIMEOUT / 3600.0, 2), user.mention)
+        await client.send_ttl_message(chan, msg)
+        return
+    finally:
+        await sent.delete()
 
     ticket = tickdb.schema.Ticket(user_id=user.id, supporter_id=responder.id,
-                                  guild_id=guild.id, request_msg=gather.format(roles))
+                                  guild_id=guild.id, request_msg=msg)
     session = tickdb.Session()
     session.add(ticket)
     session.flush()
@@ -836,11 +914,11 @@ async def practice_ticket_request(client, chan, user, config):
                                                read_message_history=True,
                                                add_reactions=True),
     }
-    ticket_name = tick.util.clean_input(NAME_TEMPLATE.format(
+    ticket_name = tick.util.clean_input("P_" + NAME_TEMPLATE.format(
         id=ticket.id, user=user.name, taker=responder.name))
     ticket_category = [x for x in guild.categories if x.id == config.category_channel_id][0]
     ticket_channel = await guild.create_text_channel(name=ticket_name,
-                                                     topic="A private ticket for {}.".format(user.name),
+                                                     topic="A private practice ticket for {}.".format(user.name),
                                                      overwrites=overwrites,
                                                      category=ticket_category)
     ticket.channel_id = ticket_channel.id
@@ -848,10 +926,10 @@ async def practice_ticket_request(client, chan, user, config):
 
     if log_channel:
         await log_channel.send(
-            LOG_TEMPLATE.format(action="Created", user=user.name,
+            LOG_TEMPLATE.format(action="Practice Created", user=user.name,
                                 msg="__Responder:__ {}\n__Channel:__ {} | {}".format(responder.name, chan.name, chan.mention)),
         )
-    msg = await ticket_channel.send(TICKET_WELCOME.format(
+    msg = await ticket_channel.send(PRACTICE_TICKET_WELCOME.format(
         prefix=client.prefix, mention=" ".join((user.mention, responder.mention))))
     await msg.pin()
 

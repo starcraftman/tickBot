@@ -106,6 +106,7 @@ def subs_ticket(subs, prefix):
     tick_sub.add_argument('reason', nargs='+', help='The name of the ticket.')
     tick_sub = tick_subs.add_parser('rename', help='ate a new ticket.')
     tick_sub.add_argument('name', nargs='+', help='The name of the ticket.')
+    tick_sub = tick_subs.add_parser('review', help='Get a responder to review.')
     tick_sub = tick_subs.add_parser('swap', help='Get a new responder.')
 
 

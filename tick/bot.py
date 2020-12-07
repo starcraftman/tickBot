@@ -168,7 +168,7 @@ class TickBot(discord.Client):
                         await reaction.remove(payload.member)
                         if msg.id == config.support_pin_id:
                             coro = tick.actions.ticket_request(self, chan, payload.member, config)
-                        elif msg.id == config.support_pin_id:
+                        elif msg.id == config.practice_pin_id:
                             coro = tick.actions.practice_ticket_request(self, chan, payload.member, config)
                     elif str(reaction) != tick.actions.PIN_EMOJI:
                         await reaction.clear()
