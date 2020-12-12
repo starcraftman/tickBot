@@ -6,6 +6,7 @@ All actions have async execute methods.
 import asyncio
 import logging
 import os
+import re
 import shutil
 import tempfile
 
@@ -439,8 +440,11 @@ class Ticket(Action):
             raise tick.exc.InvalidCommandArgs("I can only rename within ticket channels.") from e
 
         new_name = tick.util.clean_input(" ".join(self.args.name)).lower()[:100]
-        if not new_name.startswith("{}-".format(ticket.id)):
-            new_name = "{}-".format(ticket.id) + new_name
+        new_name = re.sub(r'(p-)?({}-)?'.format(ticket.id), '', new_name)
+        fmt = '{id}-{name}'
+        if ticket.is_practice:
+            fmt = 'p-' + fmt
+        new_name = fmt.format(id=ticket.id, name=new_name)
         old_name = self.msg.channel.name
         await self.msg.channel.edit(reason='New name was requested.', name=new_name)
         await log_channel.send(
@@ -474,14 +478,18 @@ class Ticket(Action):
         if str(reaction) == NO_EMOJI:
             return
 
+        old_responder = self.bot.get_user(ticket.supporter_id)
         overwrites = self.msg.channel.overwrites
+        overwrites[old_responder] = discord.PermissionOverwrite(
+            read_messages=False, send_messages=False, read_message_history=False,
+            add_reactions=False
+        )
         overwrites[responder] = discord.PermissionOverwrite(
             read_messages=True, send_messages=True, read_message_history=True,
             add_reactions=True
         )
-        await self.msg.channel.edit(reason="New responder was requested.", overwrites=overwrites)
-        old_responder = self.bot.get_user(ticket.supporter_id)
         ticket.supporter_id = responder.id
+        await self.msg.channel.edit(reason="New responder was requested.", overwrites=overwrites)
 
         await log_channel.send(
             LOG_TEMPLATE.format(action="Swap", user=self.msg.author.name,
@@ -496,17 +504,20 @@ class Ticket(Action):
         """
         try:
             ticket = tickdb.query.get_ticket(self.session, self.msg.guild.id, channel_id=self.msg.channel.id)
+            if not ticket.is_practice:
+                raise sqla_oexc.NoResultFound
         except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as e:
-            raise tick.exc.InvalidCommandArgs("I can only review in ticket channels.") from e
+            raise tick.exc.InvalidCommandArgs("I can only review in **practice** ticket channels.") from e
+
         guild = self.msg.guild
         roles = (guild.get_role(guild_config.practice_role_id),)
-        support_channel = guild.get_channel(guild_config.support_channel_id)
+        support_channel = guild.get_channel(guild_config.practice_channel_id)
         user = self.bot.get_user(ticket.user_id)
 
         sent = await support_channel.send(PRACTICE_REVIEW.format(mention=roles[-1].mention))
         await sent.add_reaction(YES_EMOJI)
         await sent.add_reaction(NO_EMOJI)
-        reaction, responder = await self.bot.wait_for(
+        reaction, reviewer = await self.bot.wait_for(
             'reaction_add',
             check=request_check_factory(client=self.bot, sent=sent, user=user, roles=roles)
         )
@@ -515,23 +526,21 @@ class Ticket(Action):
             return
 
         overwrites = self.msg.channel.overwrites
-        overwrites[responder] = discord.PermissionOverwrite(
+        overwrites[reviewer] = discord.PermissionOverwrite(
             read_messages=True, send_messages=True, read_message_history=True,
             add_reactions=True
         )
         await self.msg.channel.edit(reason="Reviewer added to ticket.", overwrites=overwrites)
-        old_responder = self.bot.get_user(ticket.supporter_id)
-        ticket.supporter_id = responder.id
 
         await log_channel.send(
             LOG_TEMPLATE.format(action="Reivew", user=self.msg.author.name,
-                                msg="__New Reviewer:__ {}".format(old_responder.name, responder.name)),
+                                msg="__New Reviewer:__ {}".format(reviewer.name))
         )
 
-        return """Hello review {}!. Above is a practice ticket session.
+        return """Hello reviewer {}!. Above is a practice ticket session.
 Please read it over and provide feedback to requester who initiated the practice.
 
-Thank you very much.""".format(responder.mention)
+Thank you very much.""".format(reviewer.mention)
 
     async def execute(self):
         try:
@@ -891,7 +900,7 @@ Request will be closed soon.
         await sent.delete()
 
     ticket = tickdb.schema.Ticket(user_id=user.id, supporter_id=responder.id,
-                                  guild_id=guild.id, request_msg=msg)
+                                  guild_id=guild.id, request_msg=msg, is_practice=True)
     session = tickdb.Session()
     session.add(ticket)
     session.flush()

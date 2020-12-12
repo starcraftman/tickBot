@@ -56,11 +56,12 @@ class Ticket(Base):
     channel_id = sqla.Column(sqla.BigInteger)
     guild_id = sqla.Column(sqla.BigInteger, sqla.ForeignKey('configs.id'))
     request_msg = sqla.Column(sqla.String(LEN_REQUEST), default="")
+    is_practice = sqla.Column(sqla.Boolean, default=False)
     created_at = sqla.Column(sqla.DateTime, server_default=sqla.func.now())
     updated_at = sqla.Column(sqla.DateTime, onupdate=sqla.func.now())
 
     def __repr__(self):
-        keys = ['user_id', 'supporter_id', 'channel_id', 'guild_id', 'created_at', 'updated_at']
+        keys = ['user_id', 'supporter_id', 'channel_id', 'guild_id', 'is_practice', 'created_at', 'updated_at']
         kwargs = ['{}={!r}'.format(key, getattr(self, key)) for key in keys]
 
         return "{}({})".format(self.__class__.__name__, ', '.join(kwargs))

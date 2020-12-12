@@ -96,6 +96,8 @@ def subs_ticket(subs, prefix):
         Rename an existing ticket from inside the channel.
 {prefix}ticket swap
         The existing responder has to go, will reping for a new one.
+{prefix}ticket review
+        For use in practice tickets, pings for a reviewer to provide feedback.
     """.format(prefix=prefix)
     sub = subs.add_parser(prefix + 'ticket', description=desc, formatter_class=RawHelp)
     sub.set_defaults(cmd='Ticket')
