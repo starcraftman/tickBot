@@ -58,16 +58,24 @@ def subs_admin(subs, prefix):
     desc = """Admin command, usable by user with the following server role:
         `Ticket Supervisor`
 
-{prefix}ticket category unique substring
+{prefix}admin category unique substring
         Bot will create tickets under the category indicated by `unique substring`.
 {prefix}admin log #mention-log-channel
         Set bot to log finished tickets to this channel for upload.
-{prefix}ticket role @role
+{prefix}admin role @role
         Set bot to ping mentioned role for tickets.
-{prefix}ticket adult_role @role
+{prefix}admin adult_role @role
         Set bot to ping mentioned adult_role for tickets when an adult needed.
-{prefix}ticket support #mention-support-channel
+{prefix}admin support #mention-support-channel
         Set bot to monitor this channel for support requests.
+{prefix}admin support #mention-support-channel
+        Set bot to monitor this channel for support requests.
+{prefix}admin practice_role @role
+        Set the practice support role to pin on request.
+{prefix}admin practice_support #mention-support-channel
+        Set the practice support channel pin in the mentioned channel.
+{prefix}admin summary
+        List the current configuration for tickets.
     """.format(prefix=prefix)
     sub = subs.add_parser(prefix + 'admin', description=desc, formatter_class=RawHelp)
     sub.set_defaults(cmd='Admin')
