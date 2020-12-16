@@ -965,7 +965,8 @@ async def create_log(last_msg, fname=None):
                                                   start=str(first_msg.created_at),
                                                   end=str(last_msg.created_at)))
 
-        async for msg in last_msg.channel.history(oldest_first=True):
+        # Log entire channel no matter how long.
+        async for msg in last_msg.channel.history(limit=None, oldest_first=True):
             to_flush += TRANSCRIPT_ENTRY.format(date=msg.created_at, author=msg.author.name,
                                                 id=msg.author.id, msg=msg.content)
             if len(to_flush) > 10000:
