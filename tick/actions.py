@@ -878,7 +878,6 @@ async def practice_ticket_request(client, chan, user, config):
         reaction, responder = await client.wait_for(
             'reaction_add',
             check=request_check_factory(client=client, sent=sent, user=user, roles=[role]),
-            timeout=REQUEST_TIMEOUT,
         )
         if str(reaction) == NO_EMOJI:
             raise asyncio.CancelledError
@@ -887,13 +886,6 @@ async def practice_ticket_request(client, chan, user, config):
 Request will be closed soon.
 
 {} please consider making a new one if you still need help.""".format(user.mention)
-        await client.send_ttl_message(chan, msg)
-        return
-    except asyncio.TimeoutError:
-        msg = """It took longer than {} hour(s) to get a practice responder.
-Request will be closed soon.
-
-{} please consider making a new one if you still need help.""".format(round(REQUEST_TIMEOUT / 3600.0, 2), user.mention)
         await client.send_ttl_message(chan, msg)
         return
     finally:
