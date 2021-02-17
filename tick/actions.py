@@ -467,16 +467,22 @@ class Ticket(Action):
         support_channel = guild.get_channel(guild_config.support_channel_id)
         user = self.bot.get_user(ticket.user_id)
 
-        sent = await support_channel.send(ticket.request_msg)
-        await sent.add_reaction(YES_EMOJI)
-        await sent.add_reaction(NO_EMOJI)
-        reaction, responder = await self.bot.wait_for(
-            'reaction_add',
-            check=request_check_factory(client=self.bot, sent=sent, user=user, roles=roles)
-        )
-        await sent.delete()
-        if str(reaction) == NO_EMOJI:
+        try:
+            sent = await support_channel.send(ticket.request_msg)
+            await sent.add_reaction(YES_EMOJI)
+            await sent.add_reaction(NO_EMOJI)
+            reaction, responder = await self.bot.wait_for(
+                'reaction_add',
+                check=request_check_roles(client=self.bot, sent=sent, user=user, roles=roles),
+                timeout=RESPONSE_TIMEOUT
+            )
+            if str(reaction) == NO_EMOJI:
+                raise asyncio.CancelledError
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            # Cannot continue with request, clean up
             return
+        finally:
+            await sent.delete()
 
         old_responder = self.bot.get_user(ticket.supporter_id)
         overwrites = self.msg.channel.overwrites
@@ -514,16 +520,23 @@ class Ticket(Action):
         support_channel = guild.get_channel(guild_config.practice_channel_id)
         user = self.bot.get_user(ticket.user_id)
 
-        sent = await support_channel.send(PRACTICE_REVIEW.format(mention=roles[-1].mention))
-        await sent.add_reaction(YES_EMOJI)
-        await sent.add_reaction(NO_EMOJI)
-        reaction, reviewer = await self.bot.wait_for(
-            'reaction_add',
-            check=request_check_factory(client=self.bot, sent=sent, user=user, roles=roles)
-        )
-        await sent.delete()
-        if str(reaction) == NO_EMOJI:
+        try:
+            sent = await support_channel.send(PRACTICE_REVIEW.format(mention=roles[-1].mention))
+            await sent.add_reaction(YES_EMOJI)
+            await sent.add_reaction(NO_EMOJI)
+            reaction, reviewer = await self.bot.wait_for(
+                'reaction_add',
+                check=request_check_roles(client=self.bot, sent=sent, user=user, roles=roles),
+                timeout=RESPONSE_TIMEOUT
+            )
+            await sent.delete()
+            if str(reaction) == NO_EMOJI:
+                raise asyncio.CancelledError
+        except (asyncio.TimeoutError, asyncio.CancelledError):
+            # Cannot continue with request, clean up
             return
+        finally:
+            await sent.delete()
 
         overwrites = self.msg.channel.overwrites
         overwrites[reviewer] = discord.PermissionOverwrite(
@@ -708,7 +721,7 @@ class RequestGather():
                                    admin_role=ADMIN_ROLE, yes=YES_EMOJI, no=NO_EMOJI)
 
 
-def request_check_factory(*, client, sent, user, roles):
+def request_check_roles(*, client, sent, user, roles):
     """
     Generate a check function for a response to a request for help by a user.
     Use this function to check on a reaction to a message.
@@ -783,7 +796,7 @@ async def ticket_request(client, chan, user, config):
     try:
         reaction, responder = await client.wait_for(
             'reaction_add',
-            check=request_check_factory(client=client, sent=sent, user=user, roles=roles),
+            check=request_check_roles(client=client, sent=sent, user=user, roles=roles),
             timeout=REQUEST_TIMEOUT,
         )
         if str(reaction) == NO_EMOJI:
@@ -877,7 +890,7 @@ async def practice_ticket_request(client, chan, user, config):
     try:
         reaction, responder = await client.wait_for(
             'reaction_add',
-            check=request_check_factory(client=client, sent=sent, user=user, roles=[role]),
+            check=request_check_roles(client=client, sent=sent, user=user, roles=[role]),
         )
         if str(reaction) == NO_EMOJI:
             raise asyncio.CancelledError
@@ -990,7 +1003,6 @@ async def wait_for_user_reaction(client, chan, author, text, *, yes=YES_EMOJI, n
         TimeoutError - User didn't react within the timeout.
     """
     msg = await chan.send(text)
-
     await msg.add_reaction(yes)
     await msg.add_reaction(no)
 
