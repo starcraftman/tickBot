@@ -248,7 +248,11 @@ class Admin(Action):
         async for msg in channel.history(limit=10):
             if msg.type == discord.MessageType.pins_add:
                 to_delete += [msg]
-        await channel.delete_messages(to_delete)
+        try:
+            await channel.delete_messages(to_delete)
+        except discord.NotFound:
+            pass
+
         await self.bot.send_ttl_message(channel, SUPPORT_PIN_NOTICE, ttl=5)
 
     async def practice_support(self, guild_config):
@@ -280,7 +284,11 @@ class Admin(Action):
         async for msg in channel.history(limit=10):
             if msg.type == discord.MessageType.pins_add:
                 to_delete += [msg]
-        await channel.delete_messages(to_delete)
+        try:
+            await channel.delete_messages(to_delete)
+        except discord.NotFound:
+            pass
+
         await self.bot.send_ttl_message(channel, SUPPORT_PIN_NOTICE, ttl=5)
 
     async def role(self, guild_config):
@@ -482,7 +490,10 @@ class Ticket(Action):
             # Cannot continue with request, clean up
             return
         finally:
-            await sent.delete()
+            try:
+                await sent.delete()
+            except discord.NotFound:
+                pass
 
         old_responder = self.bot.get_user(ticket.supporter_id)
         overwrites = self.msg.channel.overwrites
@@ -529,14 +540,16 @@ class Ticket(Action):
                 check=request_check_roles(client=self.bot, sent=sent, user=user, roles=roles),
                 timeout=RESPONSE_TIMEOUT
             )
-            await sent.delete()
             if str(reaction) == NO_EMOJI:
                 raise asyncio.CancelledError
         except (asyncio.TimeoutError, asyncio.CancelledError):
             # Cannot continue with request, clean up
             return
         finally:
-            await sent.delete()
+            try:
+                await sent.delete()
+            except discord.NotFound:
+                pass
 
         overwrites = self.msg.channel.overwrites
         overwrites[reviewer] = discord.PermissionOverwrite(
@@ -695,14 +708,13 @@ class RequestGather():
         except asyncio.TimeoutError as e:
             raise tick.exc.InvalidCommandArgs("User didn't respond to questions in time. Cancelling request.") from e
         finally:
-            await self.delete_messages()
+            if self.sent:
+                try:
+                    await self.chan.delete_messages(self.sent)
+                except discord.NotFound:
+                    pass
 
         return adult_needed
-
-    async def delete_messages(self):
-        """ Simply clean up messages exchanged. """
-        if self.sent:
-            await self.chan.delete_messages(self.sent)
 
     def format(self, roles):
         """
@@ -816,7 +828,10 @@ Request will be closed soon.
         await client.send_ttl_message(chan, msg)
         return
     finally:
-        await sent.delete()
+        try:
+            await sent.delete()
+        except discord.NotFound:
+            pass
 
     ticket = tickdb.schema.Ticket(user_id=user.id, supporter_id=responder.id,
                                   guild_id=guild.id, request_msg=gather.format(roles))
@@ -902,7 +917,10 @@ Request will be closed soon.
         await client.send_ttl_message(chan, msg)
         return
     finally:
-        await sent.delete()
+        try:
+            await sent.delete()
+        except discord.NotFound:
+            pass
 
     ticket = tickdb.schema.Ticket(user_id=user.id, supporter_id=responder.id,
                                   guild_id=guild.id, request_msg=msg, is_practice=True)
