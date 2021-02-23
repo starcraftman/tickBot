@@ -30,10 +30,6 @@ NO_EMOJI = tick.util.get_config('emojis', '_no')
 U18_EMOJI = tick.util.get_config('emojis', 'u18')
 ADMIN_ROLE = tick.util.get_config('ticket', 'admin_role')
 
-LOG_PERMS = discord.Permissions(read_messages=True, send_messages=True, attach_files=True)
-SUPPORT_PERMS = discord.Permissions(read_messages=True, send_messages=True, manage_messages=True, add_reactions=True)
-TICKET_PERMS = discord.Permissions(read_messages=True, manage_channels=True, add_reactions=True)
-
 QUESTIONS = (
     "Could you briefly describe the topic? If you wish it to remain private, type no.",
     "What type of support you would like? For example: sympathy, distraction, advice, personal venting, etc ...",
@@ -126,6 +122,40 @@ If it is ever deleted simply rerun this command.
 I hope all goes well.
 """
 
+# Permissions for various users involved
+DISCORD_PERMS = {
+    'bot': discord.PermissionOverwrite(read_messages=True,
+                                       send_messages=True,
+                                       manage_messages=True,
+                                       manage_channels=True,
+                                       manage_permissions=True,
+                                       read_message_history=True,
+                                       add_reactions=True),
+    'none': discord.PermissionOverwrite(read_messages=False,
+                                        send_messages=False,
+                                        read_message_history=False,
+                                        add_reactions=False),
+    'user': discord.PermissionOverwrite(read_messages=True,
+                                        send_messages=True,
+                                        read_message_history=True,
+                                        add_reactions=True),
+    'overseer': discord.PermissionOverwrite(read_messages=True,
+                                            send_messages=True,
+                                            manage_messages=True,
+                                            read_message_history=True),
+    'log_required': discord.Permissions(read_messages=True,
+                                        send_messages=True,
+                                        attach_files=True),
+    'support_required': discord.Permissions(read_messages=True,
+                                            send_messages=True,
+                                            manage_messages=True,
+                                            add_reactions=True),
+    'ticket_required': discord.Permissions(read_messages=True,
+                                           manage_channels=True,
+                                           add_reactions=True),
+}
+# *_required are used to validate existing perms needed by bot
+
 
 class Action():
     """
@@ -186,7 +216,7 @@ class Admin(Action):
             raise tick.exc.InvalidCommandArgs("Could not match exactly 1 category. Try again!")
         cat = matches[0]
 
-        if not TICKET_PERMS.is_subset(cat.permissions_for(cat.guild.me)):
+        if not DISCORD_PERMS['ticket_required'].is_subset(cat.permissions_for(cat.guild.me)):
             perms = """
         Read Messages
         Manage Channels
@@ -207,7 +237,7 @@ class Admin(Action):
             guild_config: The guild configuration to update.
         """
         channel = self.msg.channel_mentions[0]
-        if not LOG_PERMS.is_subset(channel.permissions_for(channel.guild.me)):
+        if not DISCORD_PERMS['log_required'].is_subset(channel.permissions_for(channel.guild.me)):
             perms = """
         Read Messages
         Send Messages
@@ -228,7 +258,7 @@ class Admin(Action):
         """
         channel = self.msg.channel_mentions[0]
 
-        if not SUPPORT_PERMS.is_subset(channel.permissions_for(channel.guild.me)):
+        if not DISCORD_PERMS['support_required'].is_subset(channel.permissions_for(channel.guild.me)):
             perms = """
         Read Messages
         Send Messages
@@ -264,7 +294,7 @@ class Admin(Action):
         """
         channel = self.msg.channel_mentions[0]
 
-        if not SUPPORT_PERMS.is_subset(channel.permissions_for(channel.guild.me)):
+        if not DISCORD_PERMS['support_required'].is_subset(channel.permissions_for(channel.guild.me)):
             perms = """
         Read Messages
         Send Messages
@@ -333,6 +363,23 @@ class Admin(Action):
 
         return "Setting practice tickets to ping:\n\n**%s**" % role.name
 
+    async def overseer_roles(self, guild_config):
+        """
+        Set the role(s) that can oversee active tickets.
+
+        Args:
+            guild_config: The guild configuration to update.
+        """
+        role_ids = ",".join([str(x.id) for x in self.msg.role_mentions])
+        if len(role_ids) > tickdb.schema.LEN_OVERSEER:
+            raise tick.exc.InvalidCommandArgs("Choose less roles or see admin for more storage.")
+
+        guild_config.oversee_role_ids = role_ids
+        self.session.add(guild_config)
+
+        role_names = "\n".join([str(x.name) for x in self.msg.role_mentions])
+        return "Setting adult tickets to ping:\n\n**%s**" % role_names
+
     async def summary(self, guild_config):
         """
         Summarize the current settings for the bot.
@@ -342,11 +389,17 @@ class Admin(Action):
         """
         guild = self.msg.guild
         default = '**Not set**'
+
+        overseer_roles = ""
+        for r_id in guild_config.overseer_role_ids.split(','):
+            overseer_roles += getattr(guild.get_role(int(r_id)), 'name', default) + "\n"
+
         kwargs = {
             'adult_role': getattr(guild.get_role(guild_config.adult_role_id), 'name', default),
             'regular_role': getattr(guild.get_role(guild_config.role_id), 'name', default),
             'logs': getattr(self.msg.guild.get_channel(guild_config.log_channel_id), 'mention', default),
             'support': getattr(self.msg.guild.get_channel(guild_config.support_channel_id), 'mention', default),
+            'overseer_roles': overseer_roles,
             'category': getattr(self.msg.guild.get_channel(guild_config.category_channel_id), 'mention', default),
             'practice_role': getattr(guild.get_role(guild_config.practice_role_id), 'name', default),
             'practice': getattr(self.msg.guild.get_channel(guild_config.practice_channel_id), 'mention', default),
@@ -359,6 +412,7 @@ Support Channel: {support}
 Log Channel: {logs}
 Adult Role: {adult_role}
 Regular Role: {regular_role}
+Overseer Role(s): {overseer_roles}
 
 __Practice__
 Practice Channel: {practice}
@@ -497,14 +551,8 @@ class Ticket(Action):
 
         old_responder = self.bot.get_user(ticket.supporter_id)
         overwrites = self.msg.channel.overwrites
-        overwrites[old_responder] = discord.PermissionOverwrite(
-            read_messages=False, send_messages=False, read_message_history=False,
-            add_reactions=False
-        )
-        overwrites[responder] = discord.PermissionOverwrite(
-            read_messages=True, send_messages=True, read_message_history=True,
-            add_reactions=True
-        )
+        overwrites[old_responder] = DISCORD_PERMS['none']
+        overwrites[responder] = DISCORD_PERMS['user']
         ticket.supporter_id = responder.id
         await self.msg.channel.edit(reason="New responder was requested.", overwrites=overwrites)
 
@@ -552,10 +600,7 @@ class Ticket(Action):
                 pass
 
         overwrites = self.msg.channel.overwrites
-        overwrites[reviewer] = discord.PermissionOverwrite(
-            read_messages=True, send_messages=True, read_message_history=True,
-            add_reactions=True
-        )
+        overwrites[reviewer] = DISCORD_PERMS['user']
         await self.msg.channel.edit(reason="Reviewer added to ticket.", overwrites=overwrites)
 
         await log_channel.send(
@@ -840,23 +885,15 @@ Request will be closed soon.
     session.flush()
 
     overwrites = {
-        guild.default_role: discord.PermissionOverwrite(read_messages=False),
-        guild.me: discord.PermissionOverwrite(read_messages=True,
-                                              send_messages=True,
-                                              manage_messages=True,
-                                              manage_channels=True,
-                                              manage_permissions=True,
-                                              read_message_history=True,
-                                              add_reactions=True),
-        user: discord.PermissionOverwrite(read_messages=True,
-                                          send_messages=True,
-                                          read_message_history=True,
-                                          add_reactions=True),
-        responder: discord.PermissionOverwrite(read_messages=True,
-                                               send_messages=True,
-                                               read_message_history=True,
-                                               add_reactions=True),
+        guild.default_role: DISCORD_PERMS['none'],
+        guild.me: DISCORD_PERMS['bot'],
+        user: DISCORD_PERMS['user'],
+        responder: DISCORD_PERMS['user'],
     }
+    for r_id in config.overseer_role_ids.split(','):
+        role = guild.get_role(int(r_id))
+        overwrites[role] = DISCORD_PERMS['overseer']
+
     ticket_name = tick.util.clean_input(NAME_TEMPLATE.format(
         id=ticket.id, user=user.name, taker=responder.name))
     ticket_category = [x for x in guild.categories if x.id == config.category_channel_id][0]
@@ -929,23 +966,15 @@ Request will be closed soon.
     session.flush()
 
     overwrites = {
-        guild.default_role: discord.PermissionOverwrite(read_messages=False),
-        guild.me: discord.PermissionOverwrite(read_messages=True,
-                                              send_messages=True,
-                                              manage_messages=True,
-                                              manage_channels=True,
-                                              manage_permissions=True,
-                                              read_message_history=True,
-                                              add_reactions=True),
-        user: discord.PermissionOverwrite(read_messages=True,
-                                          send_messages=True,
-                                          read_message_history=True,
-                                          add_reactions=True),
-        responder: discord.PermissionOverwrite(read_messages=True,
-                                               send_messages=True,
-                                               read_message_history=True,
-                                               add_reactions=True),
+        guild.default_role: DISCORD_PERMS['none'],
+        guild.me: DISCORD_PERMS['bot'],
+        user: DISCORD_PERMS['user'],
+        responder: DISCORD_PERMS['user'],
     }
+    for r_id in config.overseer_role_ids.split(','):
+        role = guild.get_role(int(r_id))
+        overwrites[role] = DISCORD_PERMS['overseer']
+
     ticket_name = tick.util.clean_input("P_" + NAME_TEMPLATE.format(
         id=ticket.id, user=user.name, taker=responder.name))
     ticket_category = [x for x in guild.categories if x.id == config.category_channel_id][0]

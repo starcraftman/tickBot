@@ -11,6 +11,7 @@ import tickdb
 
 LEN_NAME = 100
 LEN_REQUEST = 2500
+LEN_OVERSEER = 500
 Base = sqlalchemy.ext.declarative.declarative_base()
 
 
@@ -27,6 +28,7 @@ class GuildConfig(Base):
     log_channel_id = sqla.Column(sqla.BigInteger)
     role_id = sqla.Column(sqla.BigInteger)
     adult_role_id = sqla.Column(sqla.BigInteger)
+    overseer_role_ids = sqla.Column(sqla.String(LEN_OVERSEER), default="")
     # All for separate practice logic.
     practice_channel_id = sqla.Column(sqla.BigInteger)
     practice_role_id = sqla.Column(sqla.BigInteger)
@@ -35,7 +37,7 @@ class GuildConfig(Base):
     def __repr__(self):
         keys = ['id', 'support_channel_id', 'category_channel_id', 'log_channel_id',
                 'role_id', 'adult_role_id', 'practice_channel_id', 'practice_role_id',
-                'practice_pin_id']
+                'practice_pin_id', 'overseer_role_ids']
         kwargs = ['{}={!r}'.format(key, getattr(self, key)) for key in keys]
 
         return "{}({})".format(self.__class__.__name__, ', '.join(kwargs))
