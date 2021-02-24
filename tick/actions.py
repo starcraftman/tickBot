@@ -378,7 +378,7 @@ class Admin(Action):
         self.session.add(guild_config)
 
         role_names = "\n".join([str(x.name) for x in self.msg.role_mentions])
-        return "Setting adult tickets to ping:\n\n**%s**" % role_names
+        return "Setting overseer roles to:\n\n**%s**" % role_names
 
     async def summary(self, guild_config):
         """
@@ -390,9 +390,10 @@ class Admin(Action):
         guild = self.msg.guild
         default = '**Not set**'
 
-        overseer_roles = ""
-        for r_id in guild_config.overseer_role_ids.split(','):
-            overseer_roles += getattr(guild.get_role(int(r_id)), 'name', default) + "\n"
+        overseer_roles = default
+        if guild_config.overseer_role_ids:
+            for r_id in guild_config.overseer_role_ids.split(','):
+                overseer_roles += getattr(guild.get_role(int(r_id)), 'name', default) + "\n"
 
         kwargs = {
             'adult_role': getattr(guild.get_role(guild_config.adult_role_id), 'name', default),
@@ -436,9 +437,12 @@ Practice Role: {practice_role}
             self.log.debug("Creating config for server: %s with id %d", guild.name, guild.id)
         self.log.info("Requested config of: %d\nFound: %s", guild.id, guild_config)
 
-        func = getattr(self, self.args.subcmd)
-        resp = await func(guild_config)
-        self.session.commit()
+        try:
+            func = getattr(self, self.args.subcmd)
+            resp = await func(guild_config)
+            self.session.commit()
+        except TypeError:
+            resp = "Please see --help for command. Invalid selection."
 
         if resp:
             await self.msg.channel.send(resp)
@@ -624,10 +628,13 @@ Thank you very much.""".format(reviewer.mention)
         except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as e:
             raise tick.exc.InvalidCommandArgs("Tickets not configured. See `{prefix}admin`".format(prefix=self.bot.prefix)) from e
 
-        func = getattr(self, self.args.subcmd)
-        resp = await func(guild_config, log_channel)
+        try:
+            func = getattr(self, self.args.subcmd)
+            resp = await func(guild_config, log_channel)
+            self.session.commit()
+        except TypeError:
+            resp = "Please see --help for command. Invalid selection."
 
-        self.session.commit()
         if resp:
             await self.msg.channel.send(resp)
 
@@ -890,9 +897,10 @@ Request will be closed soon.
         user: DISCORD_PERMS['user'],
         responder: DISCORD_PERMS['user'],
     }
-    for r_id in config.overseer_role_ids.split(','):
-        role = guild.get_role(int(r_id))
-        overwrites[role] = DISCORD_PERMS['overseer']
+    if config.overseer_role_ids:
+        for r_id in config.overseer_role_ids.split(','):
+            role = guild.get_role(int(r_id))
+            overwrites[role] = DISCORD_PERMS['overseer']
 
     ticket_name = tick.util.clean_input(NAME_TEMPLATE.format(
         id=ticket.id, user=user.name, taker=responder.name))
@@ -971,9 +979,10 @@ Request will be closed soon.
         user: DISCORD_PERMS['user'],
         responder: DISCORD_PERMS['user'],
     }
-    for r_id in config.overseer_role_ids.split(','):
-        role = guild.get_role(int(r_id))
-        overwrites[role] = DISCORD_PERMS['overseer']
+    if config.overseer_role_ids:
+        for r_id in config.overseer_role_ids.split(','):
+            role = guild.get_role(int(r_id))
+            overwrites[role] = DISCORD_PERMS['overseer']
 
     ticket_name = tick.util.clean_input("P_" + NAME_TEMPLATE.format(
         id=ticket.id, user=user.name, taker=responder.name))

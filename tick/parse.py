@@ -66,6 +66,8 @@ def subs_admin(subs, prefix):
         Set bot to ping mentioned role for tickets.
 {prefix}admin adult_role @role
         Set bot to ping mentioned adult_role for tickets when an adult needed.
+{prefix}admin overseer_roles @role1 @role2 @role3
+        Set the roles to have overseer access to all tickets.
 {prefix}admin support #mention-support-channel
         Set bot to monitor this channel for support requests.
 {prefix}admin support #mention-support-channel
@@ -84,12 +86,13 @@ def subs_admin(subs, prefix):
 
     tick_sub = tick_subs.add_parser('category', help='The category to put new tickets under.')
     tick_sub.add_argument('name', nargs='+', help='The unique substring of the category.')
-    tick_sub = tick_subs.add_parser('logs', help='Send logs to mentioned channel.')
-    tick_sub = tick_subs.add_parser('role', help='The role to ping for tickets.')
-    tick_sub = tick_subs.add_parser('adult_role', help='The role to ping for adult tickets.')
-    tick_sub = tick_subs.add_parser('support', help='Respond to support in mentioned channel.')
-    tick_sub = tick_subs.add_parser('practice_role', help='The role to ping for practice.')
-    tick_sub = tick_subs.add_parser('practice_support', help='The channel to start a practice session')
+    tick_sub = tick_subs.add_parser('logs', help='Mention the channel to send logs to.')
+    tick_sub = tick_subs.add_parser('role', help='Mention the role to ping for tickets.')
+    tick_sub = tick_subs.add_parser('adult_role', help='Mention the role to ping for adult tickets.')
+    tick_sub = tick_subs.add_parser('overseer_roles', help='Mention the role(s) to supervice tickets.')
+    tick_sub = tick_subs.add_parser('support', help='Mention the channel to handle support requestsl.')
+    tick_sub = tick_subs.add_parser('practice_role', help='Mention the role to ping for practice.')
+    tick_sub = tick_subs.add_parser('practice_support', help='Mention the channel to handle practice sessions')
     tick_sub = tick_subs.add_parser('summary', help='Show the current configuration.')
 
 
