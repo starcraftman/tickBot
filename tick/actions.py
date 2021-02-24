@@ -374,7 +374,7 @@ class Admin(Action):
         if len(role_ids) > tickdb.schema.LEN_OVERSEER:
             raise tick.exc.InvalidCommandArgs("Choose less roles or see admin for more storage.")
 
-        guild_config.oversee_role_ids = role_ids
+        guild_config.overseer_role_ids = role_ids
         self.session.add(guild_config)
 
         role_names = "\n".join([str(x.name) for x in self.msg.role_mentions])
@@ -392,8 +392,9 @@ class Admin(Action):
 
         overseer_roles = default
         if guild_config.overseer_role_ids:
+            overseer_roles = "\n"
             for r_id in guild_config.overseer_role_ids.split(','):
-                overseer_roles += getattr(guild.get_role(int(r_id)), 'name', default) + "\n"
+                overseer_roles += "  - " + getattr(guild.get_role(int(r_id)), 'name', default) + "\n"
 
         kwargs = {
             'adult_role': getattr(guild.get_role(guild_config.adult_role_id), 'name', default),
