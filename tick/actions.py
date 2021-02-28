@@ -545,6 +545,7 @@ class Ticket(Action):
         """
         try:
             ticket = tickdb.query.get_ticket(self.session, self.msg.guild.id, channel_id=self.msg.channel.id)
+            self.log.info("User request found, got db object.")
         except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as e:
             raise tick.exc.InvalidCommandArgs("I can only swap supporters in ticket channels.") from e
         guild = self.msg.guild
@@ -553,14 +554,17 @@ class Ticket(Action):
         user = self.bot.get_user(ticket.user_id)
 
         try:
+            self.log.info("SWAP: Before send.")
             sent = await support_channel.send(ticket.request_msg)
             await sent.add_reaction(YES_EMOJI)
             await sent.add_reaction(NO_EMOJI)
+            self.log.info("SWAP: Before wait_for.")
             reaction, responder = await self.bot.wait_for(
                 'reaction_add',
                 check=request_check_roles(client=self.bot, sent=sent, user=user, roles=roles),
                 timeout=RESPONSE_TIMEOUT
             )
+            self.log.info("SWAP: Response get.")
             if str(reaction) == NO_EMOJI:
                 raise asyncio.CancelledError
         except (asyncio.TimeoutError, asyncio.CancelledError):
@@ -572,18 +576,21 @@ class Ticket(Action):
             except discord.NotFound:
                 pass
 
+        self.log.info("SWAP: Processing response")
         old_responder = self.bot.get_user(ticket.supporter_id)
         overwrites = self.msg.channel.overwrites
         overwrites[old_responder] = DISCORD_PERMS['none']
         overwrites[responder] = DISCORD_PERMS['user']
         ticket.supporter_id = responder.id
         await self.msg.channel.edit(reason="New responder was requested.", overwrites=overwrites)
+        self.log.info("SWAP: After edit channel.")
 
         await log_channel.send(
             LOG_TEMPLATE.format(action="Swap", user=self.msg.author.name,
                                 msg="__Old Responder:__ {}\n__New Responder:__ {}".format(old_responder.name, responder.name)),
         )
 
+        self.log.info("SWAP: Before return.")
         return 'Hope your new responder {} can help. Take care!'.format(responder.mention)
 
     async def review(self, guild_config, log_channel):
