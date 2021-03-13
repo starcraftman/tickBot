@@ -30,6 +30,12 @@ NO_EMOJI = tick.util.get_config('emojis', '_no')
 U18_EMOJI = tick.util.get_config('emojis', 'u18')
 ADMIN_ROLE = tick.util.get_config('ticket', 'admin_role')
 
+MAX_QUESTION_LEN = 500  # characters
+QUESTIONS_CANCEL = "cancel"
+QUESTION_LENGTH_TOO_MUCH = """The response to the question was too long.
+Please answer again with a message < {} characters long.
+
+To cancel any time, just reply with: **{}**""".format(MAX_QUESTION_LEN, QUESTIONS_CANCEL)
 QUESTIONS = (
     "Could you briefly describe the topic? If you wish it to remain private, type no.",
     "What type of support you would like? For example: sympathy, distraction, advice, personal venting, etc ...",
@@ -747,14 +753,11 @@ class RequestGather():
 
             for ind, question in enumerate(self.questions, start=1):
                 self.sent += [await self.chan.send("{}) {}".format(ind, question))]
-                resp = await self.bot.wait_for(
-                    'message',
-                    check=lambda m: m.author == self.author and m.channel == self.chan,
-                    timeout=RESPONSE_TIMEOUT,
-                )
-                self.sent += [resp]
+
+                resp = await self.wait_for_response()
+
                 self.responses += [resp.content]
-                if resp.content == "Cancel":
+                if resp.content.lower() == QUESTIONS_CANCEL:
                     raise asyncio.CancelledError
         except asyncio.CancelledError as e:
             raise tick.exc.InvalidCommandArgs("Request cancelled by user.") from e
@@ -784,6 +787,32 @@ class RequestGather():
         return REQUEST_PING.format(user=self.author.name, role=role_msg,
                                    prefix=self.bot.prefix, q_text=q_text,
                                    admin_role=ADMIN_ROLE, yes=YES_EMOJI, no=NO_EMOJI)
+
+    async def wait_for_response(self):
+        """
+        Wait for a user to respond to last question.
+        A response is accepted if ...
+            - It comes from the user in the channel within timeout duration.
+            - It is less than max length, if not request user try again.
+
+        Raises:
+            asyncio.TimeoutError - If timeout exceeded.
+        """
+        resp_too_big = True
+        while resp_too_big:
+            resp = await self.bot.wait_for(
+                'message',
+                check=lambda m: m.author == self.author and m.channel == self.chan,
+                timeout=RESPONSE_TIMEOUT,
+            )
+            self.sent += [resp]
+
+            if len(resp.content) > MAX_QUESTION_LEN:
+                self.sent += [await self.chan.send(QUESTION_LENGTH_TOO_MUCH)]
+            else:
+                resp_too_big = False
+
+        return resp
 
 
 def request_check_roles(*, client, sent, user, roles):
