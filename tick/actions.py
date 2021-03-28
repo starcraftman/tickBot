@@ -127,6 +127,12 @@ Tickets can now be started by reacting to the above pin.
 If it is ever deleted simply rerun this command.
 I hope all goes well.
 """
+TICKET_CLOSE_PERMS = """
+Cannot DM the log of this ticket to the user who requested ticket.
+{} please enable DMs or do not request DMed logs during close.
+
+Aborting this attempt to close ticket.
+"""
 
 # Permissions for various users involved
 DISCORD_PERMS = {
@@ -489,8 +495,13 @@ class Ticket(Action):
                 self.bot, self.msg.channel, self.msg.author,
                 "Closing ticket. Do you want a log of this ticket DMed??")
             if resp:
-                await user.send("The log of your support session. Take care.",
-                                files=[discord.File(fp=fname, filename=os.path.basename(fname))])
+                try:
+                    await user.send("The log of your support session. Take care.",
+                                    files=[discord.File(fp=fname, filename=os.path.basename(fname))])
+                except discord.Forbidden:
+                    await self.msg.channel.send(TICKET_CLOSE_PERMS.format(self.msg.author.mention))
+                    return
+
             await self.msg.channel.delete(reason=reason)
             self.session.delete(ticket)
         except asyncio.TimeoutError:
