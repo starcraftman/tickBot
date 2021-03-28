@@ -89,7 +89,7 @@ It is logged and the log will be made available to user if requested.
 If there are any issues please ping staff.
 
 To close the ticket: `{prefix}ticket close A reason goes here.`
-To rename the ticket: `{prefix}ticket A new name for ticket`
+To rename the ticket: `{prefix}ticket rename A new name for ticket`
     Names of tickets should be < 100 characters and stick to spaces, letters, numbers and '-'.
 To get a new supporter (if they must go): `{prefix}ticket swap`
 """
