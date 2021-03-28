@@ -493,7 +493,7 @@ class Ticket(Action):
 
             resp, _ = await wait_for_user_reaction(
                 self.bot, self.msg.channel, self.msg.author,
-                "Closing ticket. Do you want a log of this ticket DMed??")
+                "Closing ticket. Do you want a log of this ticket DMed?")
             if resp:
                 try:
                     await user.send("The log of your support session. Take care.",
