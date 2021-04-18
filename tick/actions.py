@@ -485,8 +485,9 @@ class Ticket(Action):
                 raise asyncio.TimeoutError
 
             fname = await create_log(msg, os.path.join(tempfile.mkdtemp(), self.msg.channel.name + ".txt"))
+            user_name = user.name if user else "user left ticket Title: " + self.msg.channel.name
             await log_channel.send(
-                LOG_TEMPLATE.format(action="Close", user=user.name,
+                LOG_TEMPLATE.format(action="Close", user=user_name,
                                     msg="__Reason:__ {}.".format(reason)),
                 files=[discord.File(fp=fname, filename=os.path.basename(fname))]
             )
@@ -494,7 +495,7 @@ class Ticket(Action):
             resp, _ = await wait_for_user_reaction(
                 self.bot, self.msg.channel, self.msg.author,
                 "Closing ticket. Do you want a log of this ticket DMed?")
-            if resp:
+            if resp and user:
                 try:
                     await user.send("The log of your support session. Take care.",
                                     files=[discord.File(fp=fname, filename=os.path.basename(fname))])
