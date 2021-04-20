@@ -471,9 +471,15 @@ class Ticket(Action):
         """
         try:
             ticket = tickdb.query.get_ticket(self.session, self.msg.guild.id, channel_id=self.msg.channel.id)
-            user = self.msg.guild.get_member(ticket.user_id)
         except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as e:
             raise tick.exc.InvalidCommandArgs("I can only close within ticket channels.") from e
+
+        # Identify users by posted pin, users have left mid ticket
+        try:
+            chan_pins = await self.msg.channel.pins()
+            user_name = re.search(r'"\*\*(.+)\*\*"', chan_pins[0].content).group(1)
+        except (AttributeError, IndexError):
+            user_name = "Error parsing user, channel_name: {}".format(self.msg.channel.name)
 
         reason = ' '.join(self.args.reason)
         resp, fname = '', ''
@@ -485,7 +491,6 @@ class Ticket(Action):
                 raise asyncio.TimeoutError
 
             fname = await create_log(msg, os.path.join(tempfile.mkdtemp(), self.msg.channel.name + ".txt"))
-            user_name = user.name if user else "user left ticket Title: " + self.msg.channel.name
             await log_channel.send(
                 LOG_TEMPLATE.format(action="Close", user=user_name,
                                     msg="__Reason:__ {}.".format(reason)),
@@ -495,10 +500,12 @@ class Ticket(Action):
             resp, _ = await wait_for_user_reaction(
                 self.bot, self.msg.channel, self.msg.author,
                 "Closing ticket. Do you want a log of this ticket DMed?")
-            if resp and user:
+            if resp:
                 try:
-                    await user.send("The log of your support session. Take care.",
-                                    files=[discord.File(fp=fname, filename=os.path.basename(fname))])
+                    user = self.msg.guild.get_member(ticket.user_id)
+                    if user:
+                        await user.send("The log of your support session. Take care.",
+                                        files=[discord.File(fp=fname, filename=os.path.basename(fname))])
                 except discord.Forbidden:
                     await self.msg.channel.send(TICKET_CLOSE_PERMS.format(self.msg.author.mention))
                     return
@@ -962,6 +969,8 @@ Request will be closed soon.
     msg = await ticket_channel.send(TICKET_WELCOME.format(
         prefix=client.prefix, mention=" ".join((user.mention, responder.mention))))
     await msg.pin()
+    request = await ticket_channel.send(gather.format([]))
+    await request.pin()
 
 
 async def practice_ticket_request(client, chan, user, config):
