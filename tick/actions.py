@@ -471,9 +471,13 @@ class Ticket(Action):
         """
         try:
             ticket = tickdb.query.get_ticket(self.session, self.msg.guild.id, channel_id=self.msg.channel.id)
-            user = self.msg.guild.get_member(ticket.user_id)
         except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as e:
             raise tick.exc.InvalidCommandArgs("I can only close within ticket channels.") from e
+
+        try:
+            user_name = parse_first_mention(await self.msg.channel.pins()[0])
+        except IndexError:
+            user_name = "PIN WAS DELETED BEFORE CLOSE"
 
         reason = ' '.join(self.args.reason)
         resp, fname = '', ''
@@ -485,7 +489,6 @@ class Ticket(Action):
                 raise asyncio.TimeoutError
 
             fname = await create_log(msg, os.path.join(tempfile.mkdtemp(), self.msg.channel.name + ".txt"))
-            user_name = user.name if user else "user left ticket Title: " + self.msg.channel.name
             await log_channel.send(
                 LOG_TEMPLATE.format(action="Close", user=user_name,
                                     msg="__Reason:__ {}.".format(reason)),
@@ -495,10 +498,12 @@ class Ticket(Action):
             resp, _ = await wait_for_user_reaction(
                 self.bot, self.msg.channel, self.msg.author,
                 "Closing ticket. Do you want a log of this ticket DMed?")
-            if resp and user:
+            if resp:
                 try:
-                    await user.send("The log of your support session. Take care.",
-                                    files=[discord.File(fp=fname, filename=os.path.basename(fname))])
+                    user = self.msg.guild.get_member(ticket.user_id)
+                    if user:
+                        await user.send("The log of your support session. Take care.",
+                                        files=[discord.File(fp=fname, filename=os.path.basename(fname))])
                 except discord.Forbidden:
                     await self.msg.channel.send(TICKET_CLOSE_PERMS.format(self.msg.author.mention))
                     return
@@ -962,6 +967,8 @@ Request will be closed soon.
     msg = await ticket_channel.send(TICKET_WELCOME.format(
         prefix=client.prefix, mention=" ".join((user.mention, responder.mention))))
     await msg.pin()
+    summary = await ticket_channel.send(gather.format([]))
+    await summary.pin()
 
 
 async def practice_ticket_request(client, chan, user, config):
@@ -1118,6 +1125,21 @@ async def bot_shutdown(bot):  # pragma: no cover
     """
     logging.getLogger(__name__).error('FINAL SHUTDOWN REQUESTED')
     await bot.logout()
+
+
+def parse_first_mention(text):
+    """
+    Find the first user that has been mentioned in a text.
+
+    Returns:
+        user_name: A string if match found, none otherwise.
+    """
+    try:
+        result = re.search(r'@(\S+)', text).group(1)
+    except AttributeError:
+        result = None
+
+    return result
 
 
 def user_info(user):  # pragma: no cover
