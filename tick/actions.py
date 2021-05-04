@@ -556,10 +556,12 @@ class Ticket(Action):
             raise tick.exc.InvalidCommandArgs("I can only swap supporters in ticket channels.") from e
         guild = self.msg.guild
         roles = (guild.get_role(guild_config.adult_role_id), guild.get_role(guild_config.role_id))
-        support_channel = guild.get_channel(guild_config.support_channel_id)
+        channel_id = guild_config.practice_channel_id if ticket.is_practice else guild_config.support_channel_id
+        support_channel = guild.get_channel(channel_id)
         user = self.bot.get_user(ticket.user_id)
 
         try:
+            self.log.info("Sending Swap Message")
             sent = await support_channel.send(ticket.request_msg)
             await sent.add_reaction(YES_EMOJI)
             await sent.add_reaction(NO_EMOJI)
@@ -579,12 +581,14 @@ class Ticket(Action):
             except discord.NotFound:
                 pass
 
+        self.log.info("Received swap user: %s", responder.name)
         old_responder = self.bot.get_user(ticket.supporter_id)
         overwrites = self.msg.channel.overwrites
         overwrites[old_responder] = DISCORD_PERMS['none']
         overwrites[responder] = DISCORD_PERMS['user']
         ticket.supporter_id = responder.id
         await self.msg.channel.edit(reason="New responder was requested.", overwrites=overwrites)
+        self.log.info("Swap made")
 
         await log_channel.send(
             LOG_TEMPLATE.format(action="Swap", user=self.msg.author.name,
