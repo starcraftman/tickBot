@@ -133,6 +133,11 @@ Cannot DM the log of this ticket to the user who requested ticket.
 
 Aborting this attempt to close ticket.
 """
+SWAP_NOTICE = """
+Thank you {supporter} for taking the time and effort to support {user}.
+A request for a new supporter has been sent to {channel}, another supporter will be with you ASAP!
+If another supporter is not with you within 10 minutes, you're welcome to manually ping the mentioned role once every 10 minutes!
+"""
 
 # Permissions for various users involved
 DISCORD_PERMS = {
@@ -559,8 +564,13 @@ class Ticket(Action):
         channel_id = guild_config.practice_channel_id if ticket.is_practice else guild_config.support_channel_id
         support_channel = guild.get_channel(channel_id)
         user = self.bot.get_user(ticket.user_id)
+        old_responder = self.bot.get_user(ticket.supporter_id)
 
         try:
+            await self.msg.channel.send(SWAP_NOTICE.format(
+                user=user.mention, supporter=old_responder.mention,
+                channel=support_channel.mention
+            ))
             self.log.info("Sending Swap Message")
             sent = await support_channel.send(ticket.request_msg)
             await sent.add_reaction(YES_EMOJI)
@@ -582,7 +592,6 @@ class Ticket(Action):
                 pass
 
         self.log.info("Received swap user: %s", responder.name)
-        old_responder = self.bot.get_user(ticket.supporter_id)
         overwrites = self.msg.channel.overwrites
         overwrites[old_responder] = DISCORD_PERMS['none']
         overwrites[responder] = DISCORD_PERMS['user']
