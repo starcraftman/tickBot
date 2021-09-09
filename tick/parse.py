@@ -78,6 +78,12 @@ def subs_admin(subs, prefix):
         Set the practice support channel pin in the mentioned channel.
 {prefix}admin summary
         List the current configuration for tickets.
+{prefix}admin questions
+        List the current questions for a ticket.
+{prefix}admin set_question number The question goes here ...
+        Set the question to be asked, in order of increasing numbers. Start at 1.
+{prefix}admin del_question number
+        Delete the question with the given number.
     """.format(prefix=prefix)
     sub = subs.add_parser(prefix + 'admin', description=desc, formatter_class=RawHelp)
     sub.set_defaults(cmd='Admin')
