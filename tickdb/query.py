@@ -3,7 +3,10 @@ Module should handle logic related to querying/manipulating tables from a high l
 """
 import datetime
 
-from tickdb.schema import (Ticket, GuildConfig)
+import sqlalchemy as sqla
+
+from tickdb.schema import (Ticket, GuildConfig, Question)
+import tickdb.schema
 
 
 def get_guild_config(session, guild_id):
@@ -79,3 +82,29 @@ async def get_active_tickets(session, guild):
         all_ticks += [tick]
 
     return (all_ticks, three_days, seven_days)
+
+
+def get_question_by_id(session, *, id=1):
+    """
+    Get an existing Question by ID, if it doesn't exist create it.
+
+    Returns:
+        A Question object requestion.
+    """
+    try:
+        question = session.query(Question).\
+            filter(Question.id == id).\
+            one()
+    except sqla.orm.exc.NoResultFound:
+        question = Question(id=id)
+        session.add(question)
+        session.commit()
+
+    return question
+
+
+def get_all_questions(session):
+    """
+    Get all the currently set messages.
+    """
+    return session.query(Question).order_by(Question.id).all()

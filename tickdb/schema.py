@@ -11,6 +11,7 @@ import tickdb
 
 LEN_NAME = 100
 LEN_REQUEST = 2500
+LEN_QUESTION = 400
 LEN_OVERSEER = 500
 Base = sqlalchemy.ext.declarative.declarative_base()
 
@@ -78,13 +79,48 @@ class Ticket(Base):
         return isinstance(other, Ticket) and self.name == other.name
 
 
+class Question(Base):
+    """
+    A question to ask user upon every request.
+    """
+    __tablename__ = 'questions'
+
+    id = sqla.Column(sqla.Integer, primary_key=True)
+    text = sqla.Column(sqla.String(LEN_QUESTION), default="")
+
+    def __repr__(self):
+        keys = ['id', 'text']
+        kwargs = ['{}={!r}'.format(key, getattr(self, key)) for key in keys]
+
+        return "{}({})".format(self.__class__.__name__, ', '.join(kwargs))
+
+    def __str__(self):
+        return "{id}) {text}".format(id=self.id, text=self.text)
+
+    def __eq__(self, other):
+        return isinstance(other, Question) and self.id == other.id
+
+    @sqla.orm.validates('text')
+    def validate_text(self, key, value):
+        """
+        Validate text and ensure it is what is expected and of right length.
+        """
+        try:
+            if not value:
+                raise ValueError("Text was empty.")
+            if len(value) > LEN_QUESTION:
+                raise ValueError("Text longer than allowable {} chars.".format(LEN_QUESTION))
+        except TypeError:
+            raise ValueError("Text was not of right type.")
+
+        return value
+
+
 def empty_tables(session, *, perm=False):
     """
     Drop all tables.
     """
-    classes = [Ticket, GuildConfig]
-
-    for cls in classes:
+    for cls in ALL_CLASSES:
         for matched in session.query(cls):
             session.delete(matched)
     session.commit()
@@ -102,6 +138,7 @@ if tickdb.TEST_DB:
     recreate_tables()
 else:
     Base.metadata.create_all(tickdb.engine)
+ALL_CLASSES = [Question, Ticket, GuildConfig]
 
 
 def main():  # pragma: no cover

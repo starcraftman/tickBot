@@ -95,6 +95,13 @@ def subs_admin(subs, prefix):
     tick_sub = tick_subs.add_parser('practice_support', help='Mention the channel to handle practice sessions')
     tick_sub = tick_subs.add_parser('summary', help='Show the current configuration.')
 
+    tick_sub = tick_subs.add_parser('questions', help='Show the current questions.')
+    tick_sub = tick_subs.add_parser('set_question', help='Set the question indicated.')
+    tick_sub.add_argument('number', type=int, help='The number of the question.')
+    tick_sub.add_argument('text', nargs='+', help='The text of the question.')
+    tick_sub = tick_subs.add_parser('del_question', help='Delete the question indicated.')
+    tick_sub.add_argument('number', type=int, help='The number of the question.')
+
 
 @register_parser
 def subs_ticket(subs, prefix):

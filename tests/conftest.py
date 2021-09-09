@@ -20,7 +20,7 @@ except ImportError:
 import tick.util
 import tickdb
 import tickdb.query
-from tickdb.schema import (GuildConfig, Ticket)
+from tickdb.schema import (GuildConfig, Ticket, Question)
 
 
 #  @pytest.yield_fixture(scope='function', autouse=True)
@@ -125,7 +125,27 @@ def f_tickets(session):
 
 
 @pytest.fixture
-def f_testbed(f_guild_configs, f_tickets):
+def f_questions(session):
+    """
+    Fixture to insert some test Tickets.
+    """
+    tickets = (
+        Question(id=1, text='What do pythons eat?'),
+        Question(id=2, text='What is a question?'),
+        Question(id=3, text='What is the meaning of life?'),
+    )
+    session.add_all(tickets)
+    session.commit()
+
+    yield tickets
+
+    for matched in session.query(Question):
+        session.delete(matched)
+    session.commit()
+
+
+@pytest.fixture
+def f_testbed(f_guild_configs, f_tickets, f_questions):
 
     yield [f_guild_configs, f_tickets]
 

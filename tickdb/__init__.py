@@ -13,6 +13,7 @@ Relationship backrefs:
 """
 import logging
 import sys
+from contextlib import contextmanager
 
 import sqlalchemy
 import sqlalchemy.event
@@ -54,3 +55,20 @@ def fresh_sessionmaker(db=None):
 
     eng = sqlalchemy.create_engine(MYSQL_SPEC.format(**creds), echo=False, pool_recycle=3600)
     return sqlalchemy.orm.sessionmaker(bind=eng)
+
+
+@contextmanager
+def session_scope(*args, **kwargs):
+    """
+    Provide a transactional scope around a series of operations.
+    """
+    session_maker = args[0]
+    session = session_maker(**kwargs)
+    try:
+        yield session
+        session.commit()
+    except:  # noqa: E722
+        session.rollback()
+        raise
+    finally:
+        session.close()

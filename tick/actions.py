@@ -36,11 +36,6 @@ QUESTION_LENGTH_TOO_MUCH = """The response to the question was too long.
 Please answer again with a message < {} characters long.
 
 To cancel any time, just reply with: **{}**""".format(MAX_QUESTION_LEN, QUESTIONS_CANCEL)
-QUESTIONS = (
-    "Could you briefly describe the topic? If you wish it to remain private, type no.",
-    "What type of support you would like? For example: sympathy, distraction, advice, personal venting, etc ...",
-    "How long you would like to be supported for?",
-)
 NAME_TEMPLATE = "{id}-{user:.5}-{taker:.5}"
 
 PERMS_TEMPLATE = """This bot requires following perms for {}:
@@ -182,7 +177,7 @@ class Action():
         self.args = kwargs['args']
         self.bot = kwargs['bot']
         self.msg = kwargs['msg']
-        self.session = tickdb.Session()
+        self.session = kwargs['session']
         self.log = logging.getLogger(__name__)
 
     async def execute(self):
@@ -437,6 +432,55 @@ __Practice__
 Practice Channel: {practice}
 Practice Role: {practice_role}
         """.format(**kwargs)
+
+    async def del_question(self, _):
+        """
+        Summarize the current settings for the bot.
+
+        Args:
+            guild_config: The guild configuration to update.
+        """
+        id_num = self.args.number
+        if id_num < 1:
+            raise tick.exc.InvalidCommandArgs("IDs for questions must be >= 1.")
+
+        question = tickdb.query.get_question_by_id(self.session, id=id_num)
+        self.session.delete(question)
+
+        return "The question with ID {} was deleted.".format(id_num)
+
+    async def set_question(self, _):
+        """
+        Summarize the current settings for the bot.
+
+        Args:
+            guild_config: The guild configuration to update.
+        """
+        id_num = self.args.number
+        if id_num < 1:
+            raise tick.exc.InvalidCommandArgs("IDs for questions must be >= 1.")
+
+        question = tickdb.query.get_question_by_id(self.session, id=id_num)
+        try:
+            question.text = ' '.join(self.args.text)
+            msg = "Question number {} was updated to:\n\n{}".format(id_num, str(question))
+        except ValueError as e:
+            raise tick.exc.InvalidCommandArgs(str(e))
+
+        return msg
+
+    async def questions(self, _):
+        """
+        Summarize the current settings for the bot.
+
+        Args:
+            guild_config: The guild configuration to update.
+        """
+        await self.msg.channel.send("The questions currently set:")
+        for question in tickdb.query.get_all_questions(self.session):
+            await self.msg.channel.send(str(question))
+
+        return ""
 
     async def execute(self):
         """
@@ -730,10 +774,13 @@ class RequestGather():
         self.bot = bot
         self.chan = chan
         self.author = author
-        self.questions = QUESTIONS
         self.responses = []
         self.sent = []
         self.adult_needed = False
+
+        with tickdb.session_scope(tickdb.Session) as session:
+            questions = tickdb.query.get_all_questions(session)
+            self.questions = [x.text for x in questions]
 
     def __repr__(self):
         keys = ['chan', 'author', 'questions', 'responses']

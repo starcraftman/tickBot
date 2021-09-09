@@ -283,7 +283,9 @@ class TickBot(discord.Client):
         """
         args = kwargs.get('args')
         cls = getattr(tick.actions, args.cmd)
-        await cls(**kwargs).execute()
+        with tickdb.session_scope(tickdb.Session) as session:
+            kwargs['session'] = session
+            await cls(**kwargs).execute()
 
     async def send_ttl_message(self, destination, content, **kwargs):
         """
