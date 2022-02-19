@@ -1,0 +1,10 @@
+__User Feedback/Ideas__
+- Change ticket creation and swaps to follow timeout, practice never times out.
+- Three different reactions, practice, ticket1 and ticket2 flows.
+- Each ticket flow has own roles pinged/viewing, own messages set by admin.
+- Clicking ticket, immediately makes new in category. Prefix channel accordingly.
+- Ping user inside to answer questions. When questions done, open to claims by roles assigned.
+- Once claimed, only staff & participants.
+- Rather than swap, simply make it unclaimed and back to initial state.
+- Pin a control panel inside each ticket with reactions to handle changing state:
+  close ticket, unclaim, report issue?

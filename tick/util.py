@@ -28,6 +28,7 @@ LOG_MSG = """See main.log for general traces.
 Rolling over existing file logs as listed below.
     module_name -> output_file
     =========================="""
+NOT_SET = '**Not set**'
 
 
 def substr_match(seq, line, *, skip_spaces=True, ignore_case=True):

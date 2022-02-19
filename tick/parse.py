@@ -55,58 +55,42 @@ def register_parser(func):
 @register_parser
 def subs_admin(subs, prefix):
     """ Subcommand parsing for admin """
-    desc = """Admin command, usable by user with the following server role:
+    desc = """Admin command, usable by user(s) with the following server role:
         `Ticket Supervisor`
 
-{prefix}admin category unique substring
-        Bot will create tickets under the category indicated by `unique substring`.
-{prefix}admin log #mention-log-channel
-        Set bot to log finished tickets to this channel for upload.
-{prefix}admin role @role
-        Set bot to ping mentioned role for tickets.
-{prefix}admin adult_role @role
-        Set bot to ping mentioned adult_role for tickets when an adult needed.
-{prefix}admin overseer_roles @role1 @role2 @role3
-        Set the roles to have overseer access to all tickets.
-{prefix}admin support #mention-support-channel
-        Set bot to monitor this channel for support requests.
-{prefix}admin support #mention-support-channel
-        Set bot to monitor this channel for support requests.
-{prefix}admin practice_role @role
-        Set the practice support role to pin on request.
-{prefix}admin practice_support #mention-support-channel
-        Set the practice support channel pin in the mentioned channel.
+To setup run in following order:
+        {prefix}admin guild_setup
+        {prefix}admin pin
+        {prefix}admin ticket_setup [name]
+
+{prefix}admin guild_setup
+        Run through interactive configuration for the guild.
+{prefix}admin pin
+        Write a message to be pinned in ticket channel.
+        Tickets reactions will be hooked onto this pinned message.
+        Configuration of individual tickets will come after this pin.
+{prefix}admin ticket_setup [name]
+        Run through interactive configuration for one ticket flow on guild.
+{prefix}admin show_questions [name]
+        Run through the questions for a ticket with [name].
+        You will be able to edit or delete existing or add new ones.
+{prefix}admin edit_questions [name]
+        You will be able to edit or delete existing questions or add new ones.
 {prefix}admin summary
-        List the current configuration for tickets.
-{prefix}admin questions
-        List the current questions for a ticket.
-{prefix}admin set_question number The question goes here ...
-        Set the question to be asked, in order of increasing numbers. Start at 1.
-{prefix}admin del_question number
-        Delete the question with the given number.
+        List the current configuration for the guild's tickets.
     """.format(prefix=prefix)
     sub = subs.add_parser(prefix + 'admin', description=desc, formatter_class=RawHelp)
     sub.set_defaults(cmd='Admin')
     tick_subs = sub.add_subparsers(title='subcommands',
-                                   description='Admin subcommands', dest='subcmd')
+                                   description='admin subcommands', dest='subcmd')
 
-    tick_sub = tick_subs.add_parser('category', help='The category to put new tickets under.')
-    tick_sub.add_argument('name', nargs='+', help='The unique substring of the category.')
-    tick_sub = tick_subs.add_parser('logs', help='Mention the channel to send logs to.')
-    tick_sub = tick_subs.add_parser('role', help='Mention the role to ping for tickets.')
-    tick_sub = tick_subs.add_parser('adult_role', help='Mention the role to ping for adult tickets.')
-    tick_sub = tick_subs.add_parser('overseer_roles', help='Mention the role(s) to supervice tickets.')
-    tick_sub = tick_subs.add_parser('support', help='Mention the channel to handle support requestsl.')
-    tick_sub = tick_subs.add_parser('practice_role', help='Mention the role to ping for practice.')
-    tick_sub = tick_subs.add_parser('practice_support', help='Mention the channel to handle practice sessions')
+    tick_sub = tick_subs.add_parser('ticket_setup', help='Configure an individual ticket.')
+    tick_sub.add_argument('name', help='The unique substring of the category.')
+    tick_sub = tick_subs.add_parser('guild_setup', help='Perform interactive guild configuration.')
+    tick_sub = tick_subs.add_parser('pin', help='Create the main support pin.')
+    tick_sub = tick_subs.add_parser('ticket_questions', help='Create the main support pin.')
+    tick_sub.add_argument('name', help='The unique substring of the category.')
     tick_sub = tick_subs.add_parser('summary', help='Show the current configuration.')
-
-    tick_sub = tick_subs.add_parser('questions', help='Show the current questions.')
-    tick_sub = tick_subs.add_parser('set_question', help='Set the question indicated.')
-    tick_sub.add_argument('number', type=int, help='The number of the question.')
-    tick_sub.add_argument('text', nargs='+', help='The text of the question.')
-    tick_sub = tick_subs.add_parser('del_question', help='Delete the question indicated.')
-    tick_sub.add_argument('number', type=int, help='The number of the question.')
 
 
 @register_parser

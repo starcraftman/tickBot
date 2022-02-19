@@ -133,6 +133,26 @@ Thank you {supporter} for taking the time and effort to support {user}.
 A request for a new supporter has been sent to {channel}, another supporter will be with you ASAP!
 If another supporter is not with you within 10 minutes, you're welcome to manually ping the mentioned role once every 10 minutes!
 """
+GUILD_SUMMARY = """
+__{guild}__
+
+Ticket Category: {category}
+Log Channel: {log_channel}
+Ticket Channel: {tickets_channel}
+Pinned Message: {message}
+
+__Ticket Flows__
+"""
+TICKET_CONFIG_SUMMARY = """
+Name: {name}
+Prefix: {prefix}
+Emoji: {emoji}
+Timeout: {timeout}
+Responding Roles: {roles}
+"""
+MSG_OR_STOP = "{} Type 'stop' to cancel."
+STOP_MSG = "stop"
+
 
 # Permissions for various users involved
 DISCORD_PERMS = {
@@ -190,207 +210,168 @@ class Action():
 
 class Admin(Action):
     """
-    Provide the ticket command.
+    Provide high level configuration of the ticket bot.
     """
-    async def active(self, guild_config):
+    async def pin(self, guild_config):
         """
-        Set the target category to create new tickets under.
-        Cannot mention categories so pass a substring that is unique.
-
-        Args:
-            guild_config: The guild configuration to update.
+        Create or update the pin that tickets will use.
         """
-        _, three_ago, seven_ago = tickdb.query.get_active_tickets(self.session, guild_config.id)
+        chan = self.msg.channel
+        client = self.bot
+        resp = None
+        def check(msg):
+            """ Wait for response in this channel and from the instigating author. """
+            return msg.channel == chan and msg.author == self.msg.author
 
-        msg = "__Tickets No Activity 7 Days__\n"
-        lines = [['Ticket Channel', 'Date']] + \
-            [[tick.channel_name, tick.last_msg] for tick in seven_ago]
-        msg += tick.tbl.wrap_markdown(tick.tbl.format_table(lines, header=True))
-        await self.msg.channel.send(msg)
+        # If a pin exists in config, unpin it.
+        if guild_config.pinned_message_id:
+            try:
+                ticket_chan = self.msg.guild.get_channel(guild_config.ticket_channel_id)
+                pinned = await ticket_chan.fetch_message(guild_config.pinned_message_id)
+                await pinned.unpin()
+                await pinned.delete()
+            except discord.errors.NotFound:
+                pass
 
-        msg = "\n\n__Tickets No Activity 3 Days__\n"
-        lines = [['Ticket Channel', 'Date']] + \
-            [[tick.channel_name, tick.last_msg] for tick in three_ago]
-        msg += tick.tbl.wrap_markdown(tick.tbl.format_table(lines, header=True))
-        await self.msg.channel.send(msg)
+        await chan.send(MSG_OR_STOP.format("Please write a new message explaining the tickets you will setup. Tickets will be started by reacting to this pinned message."))
 
-    async def category(self, guild_config):
+        resp = await client.wait_for('message', check=check)
+        if resp and resp.content == STOP_MSG:
+            return "Aborting new pinned message."
+        if resp:
+            await resp.pin()
+            for ticket_config in guild_config.ticket_configs:
+                emoji = await self.msg.guild.fetch_emoji(ticket_config.emoji_id)
+                await resp.add_reaction(emoji)
+            guild_config.pinned_message_id = resp.id
+            return "Pinning your message now. Add ticket flows with: {.prefix}admin ticket_setup".format(self.bot)
+
+    async def guild_setup(self, guild_config):
         """
-        Set the target category to create new tickets under.
-        Cannot mention categories so pass a substring that is unique.
-
-        Args:
-            guild_config: The guild configuration to update.
+        Configure the guild_config interactively.
         """
-        substr = ' '.join(self.args.name).lower()
-        matches = [x for x in self.msg.guild.categories if substr in x.name.lower()]
-        if not matches or len(matches) != 1:
-            raise tick.exc.InvalidCommandArgs("Could not match exactly 1 category. Try again!")
-        cat = matches[0]
+        chan = self.msg.channel
+        client = self.bot
+        resp = None
 
-        if not DISCORD_PERMS['ticket_required'].is_subset(cat.permissions_for(cat.guild.me)):
-            perms = """
-        Read Messages
-        Manage Channels
-        Add Reactions"""
-            raise tick.exc.InvalidPerms(PERMS_TEMPLATE.format("Ticket Category Channel", perms))
+        def check(msg):
+            """ Wait for response in this channel and from the instigating author. """
+            return msg.channel == chan and msg.author == self.msg.author
 
-        guild_config.category_channel_id = cat.id
-        self.session.add(guild_config)
-        self.log.debug("Matched Category '%s' for guild %s", cat.name, cat.guild)
+        while True:
+            await chan.send(MSG_OR_STOP.format("Please mention the channel to send logs to."))
+            resp = await client.wait_for('message', check=check)
+            if resp and resp.content == STOP_MSG:
+                return
+            if resp and len(resp.channel_mentions) == 1:
+                guild_config.log_channel_id = resp.channel_mentions[0].id
+                await chan.send("Setting log channel to: {}".format(resp.channel_mentions[0].mention))
+                break
 
-        return "Setting new tickets to be created under category:\n\n**%s**" % cat.name
+        while True:
+            await chan.send(MSG_OR_STOP.format("Please mention the channel to start tickets in."))
+            resp = await client.wait_for('message', check=check)
+            if resp and resp.content == STOP_MSG:
+                return
+            if resp and len(resp.channel_mentions) == 1:
+                guild_config.ticket_channel_id = resp.channel_mentions[0].id
+                await chan.send("Setting tickets channel to: {}".format(resp.channel_mentions[0].mention))
+                break
 
-    async def logs(self, guild_config):
+        while True:
+            await chan.send(MSG_OR_STOP.format("Please type the **exact** name of the category for tickets."))
+            resp = await client.wait_for('message', check=check)
+            if resp and resp.content == STOP_MSG:
+                return
+            if resp:
+                found = [x for x in self.msg.guild.categories if x.name.lower() == resp.content.lower()]
+                if not found:
+                    await chan.send("Failed to match category name, please try again.")
+                else:
+                    guild_config.category_channel_id = found[0].id
+                    await chan.send("Setting tickets category to: {}".format(found[0].name))
+                    break
+
+        await chan.send("Configuration completed! Please now use: {.prefix}admin pin".format(client))
+
+    async def ticket_setup(self, guild_config):
         """
-        Set the target logging channel.
-
-        Args:
-            guild_config: The guild configuration to update.
+        Configure a ticket flow.
         """
-        channel = self.msg.channel_mentions[0]
-        if not DISCORD_PERMS['log_required'].is_subset(channel.permissions_for(channel.guild.me)):
-            perms = """
-        Read Messages
-        Send Messages
-        Attach Files"""
-            raise tick.exc.InvalidPerms(PERMS_TEMPLATE.format("Log Channel", perms))
+        chan = self.msg.channel
+        client = self.bot
+        resp = None
+        reaction = None
+        ticket_config = tickdb.schema.TicketConfig(guild_id=self.msg.guild.id, name=self.args.name)
+        self.session.add(ticket_config)
+        self.session.flush()
 
-        guild_config.log_channel_id = channel.id
-        self.session.add(guild_config)
+        def check(msg):
+            """ Wait for response in this channel and from the instigating author. """
+            return msg.channel == chan and msg.author == self.msg.author
 
-        return "Setting the logging channel to:\n\n**%s**" % channel.name
+        while True:
+            print(ticket_config.name)
+            await chan.send(MSG_OR_STOP.format("Creating a ticket flow called: {}.\n\nPlease type a prefix for ticket channels.".format(ticket_config.name)))
+            resp = await client.wait_for('message', check=check)
+            if resp and resp.content == STOP_MSG:
+                return
+            if resp:
+                ticket_config.prefix = resp.content
+                await chan.send("Setting prefix for ticket channels to: {}".format(resp.content))
+                break
 
-    async def support(self, guild_config):
+        while True:
+            await chan.send(MSG_OR_STOP.format("Please react with the emoji to start tickets."))
+            def reaction(reaction, user):
+                return user == self.msg.author
+            reaction, _ = await client.wait_for('reaction_add', check=reaction)
+            ticket_config.emoji_id = reaction.emoji.id
+            await chan.send("Setting emoji to start tickets: {}".format(reaction))
+            break
+
+        while True:
+            await chan.send(MSG_OR_STOP.format("How long before tickets should timeout?\n\nAnswer in number of hours."))
+            resp = await client.wait_for('message', check=check)
+            if resp and resp.content == STOP_MSG:
+                return
+            if resp:
+                try:
+                    ticket_config.timeout = int(float(resp.content) * 3600)
+                    await chan.send("Setting {} tickets to timeout in: {} hours".format(ticket_config.name, resp.content))
+                    break
+                except ValueError:
+                    pass
+
+        while True:
+            await chan.send(MSG_OR_STOP.format("Mention ALL the roles you want to respond to these tickets."))
+            resp = await client.wait_for('message', check=check)
+            if resp and resp.content == STOP_MSG:
+                break
+            if resp and len(resp.role_mentions) > 1:
+                role_text = ""
+                for r_mention in resp.role_mentions:
+                    role = tickdb.schema.TicketConfigRole(
+                        ticket_config_id=ticket_config.id,
+                        role_id=r_mention.id,
+                        role_text=r_mention.name
+                    )
+                    self.session.add(role)
+                    role_text += "\n {}".format(r_mention.name)
+
+                await chan.send("Setting roles to the following:\n{}".format(role_text))
+                break
+
+        await chan.send("Ticket flow completed. Making reaction.")
+        ticket_chan = self.msg.guild.get_channel(guild_config.ticket_channel_id)
+        pinned = await ticket_chan.fetch_message(guild_config.pinned_message_id)
+        await pinned.add_reaction(reaction)
+
+    async def ticket_questions(self, guild_config):
         """
-        Set the support pinned message to react to for support.
-
-        Args:
-            guild_config: The guild configuration to update.
+        Display the ticket questions and allow interactive updating.
         """
-        channel = self.msg.channel_mentions[0]
-
-        if not DISCORD_PERMS['support_required'].is_subset(channel.permissions_for(channel.guild.me)):
-            perms = """
-        Read Messages
-        Send Messages
-        Manage Messages
-        Add Reactions"""
-            raise tick.exc.InvalidPerms(PERMS_TEMPLATE.format("Support Channel", perms))
-
-        sent = await channel.send(TICKET_PIN_MSG.format(emoji=PIN_EMOJI))
-        await sent.pin()
-        await sent.add_reaction(PIN_EMOJI)
-
-        guild_config.support_channel_id = sent.channel.id
-        guild_config.support_pin_id = sent.id
-
-        await asyncio.sleep(2)
-        to_delete = []
-        async for msg in channel.history(limit=10):
-            if msg.type == discord.MessageType.pins_add:
-                to_delete += [msg]
-        try:
-            await channel.delete_messages(to_delete)
-        except discord.NotFound:
-            pass
-
-        await self.bot.send_ttl_message(channel, SUPPORT_PIN_NOTICE, ttl=5)
-
-    async def practice_support(self, guild_config):
-        """
-        Set the practice pinned message to react to for support practice sessions.
-
-        Args:
-            guild_config: The guild configuration to update.
-        """
-        channel = self.msg.channel_mentions[0]
-
-        if not DISCORD_PERMS['support_required'].is_subset(channel.permissions_for(channel.guild.me)):
-            perms = """
-        Read Messages
-        Send Messages
-        Manage Messages
-        Add Reactions"""
-            raise tick.exc.InvalidPerms(PERMS_TEMPLATE.format("Support Channel", perms))
-
-        sent = await channel.send(TICKET_PIN_MSG.format(emoji=PIN_EMOJI))
-        await sent.pin()
-        await sent.add_reaction(PIN_EMOJI)
-
-        guild_config.practice_channel_id = sent.channel.id
-        guild_config.practice_pin_id = sent.id
-
-        await asyncio.sleep(2)
-        to_delete = []
-        async for msg in channel.history(limit=10):
-            if msg.type == discord.MessageType.pins_add:
-                to_delete += [msg]
-        try:
-            await channel.delete_messages(to_delete)
-        except discord.NotFound:
-            pass
-
-        await self.bot.send_ttl_message(channel, SUPPORT_PIN_NOTICE, ttl=5)
-
-    async def role(self, guild_config):
-        """
-        Set the role to ping for tickets.
-
-        Args:
-            guild_config: The guild configuration to update.
-        """
-        role = self.msg.role_mentions[0]
-
-        guild_config.role_id = role.id
-        self.session.add(guild_config)
-
-        return "Setting tickets to ping:\n\n**%s**" % role.name
-
-    async def adult_role(self, guild_config):
-        """
-        Set the role to ping for adult tickets.
-
-        Args:
-            guild_config: The guild configuration to update.
-        """
-        role = self.msg.role_mentions[0]
-
-        guild_config.adult_role_id = role.id
-        self.session.add(guild_config)
-
-        return "Setting adult tickets to ping:\n\n**%s**" % role.name
-
-    async def practice_role(self, guild_config):
-        """
-        Set the role to ping for practice tickets.
-
-        Args:
-            guild_config: The guild configuration to update.
-        """
-        role = self.msg.role_mentions[0]
-
-        guild_config.practice_role_id = role.id
-        self.session.add(guild_config)
-
-        return "Setting practice tickets to ping:\n\n**%s**" % role.name
-
-    async def overseer_roles(self, guild_config):
-        """
-        Set the role(s) that can oversee active tickets.
-
-        Args:
-            guild_config: The guild configuration to update.
-        """
-        role_ids = ",".join([str(x.id) for x in self.msg.role_mentions])
-        if len(role_ids) > tickdb.schema.LEN_OVERSEER:
-            raise tick.exc.InvalidCommandArgs("Choose less roles or see admin for more storage.")
-
-        guild_config.overseer_role_ids = role_ids
-        self.session.add(guild_config)
-
-        role_names = "\n".join([str(x.name) for x in self.msg.role_mentions])
-        return "Setting overseer roles to:\n\n**%s**" % role_names
+        pass
 
     async def summary(self, guild_config):
         """
@@ -400,38 +381,310 @@ class Admin(Action):
             guild_config: The guild configuration to update.
         """
         guild = self.msg.guild
-        default = '**Not set**'
+        default = tick.util.NOT_SET
+        message = default
 
-        overseer_roles = default
-        if guild_config.overseer_role_ids:
-            overseer_roles = "\n"
-            for r_id in guild_config.overseer_role_ids.split(','):
-                overseer_roles += "  - " + getattr(guild.get_role(int(r_id)), 'name', default) + "\n"
+        ticket_channel = guild.get_channel(guild_config.ticket_channel_id)
+        if ticket_channel and guild_config.pinned_message_id:
+            try:
+                message_obj = await ticket_channel.fetch_message(guild_config.pinned_message_id)
+                message = getattr(message_obj, 'jump_url', default)
+            except discord.errors.NotFound:
+                pass
 
         kwargs = {
-            'adult_role': getattr(guild.get_role(guild_config.adult_role_id), 'name', default),
-            'regular_role': getattr(guild.get_role(guild_config.role_id), 'name', default),
-            'logs': getattr(self.msg.guild.get_channel(guild_config.log_channel_id), 'mention', default),
-            'support': getattr(self.msg.guild.get_channel(guild_config.support_channel_id), 'mention', default),
-            'overseer_roles': overseer_roles,
-            'category': getattr(self.msg.guild.get_channel(guild_config.category_channel_id), 'mention', default),
-            'practice_role': getattr(guild.get_role(guild_config.practice_role_id), 'name', default),
-            'practice': getattr(self.msg.guild.get_channel(guild_config.practice_channel_id), 'mention', default),
+            'guild': guild.name,
+            'category': getattr(guild.get_channel(guild_config.category_channel_id), 'name', default),
+            'log_channel': getattr(guild.get_channel(guild_config.log_channel_id), 'mention', default),
+            'tickets_channel': getattr(guild.get_channel(guild_config.ticket_channel_id), 'mention', default),
+            'message': message
         }
+        summary = GUILD_SUMMARY.format(**kwargs)
 
-        return """
-__Live__
-Ticket Category: {category}
-Support Channel: {support}
-Log Channel: {logs}
-Adult Role: {adult_role}
-Regular Role: {regular_role}
-Overseer Role(s): {overseer_roles}
+        for ticket_config in guild_config.ticket_configs:
+            t_kwargs = ticket_config.kwargs()
+            if t_kwargs['emoji_id']:
+                try:
+                    t_kwargs['emoji'] = await guild.fetch_emoji(t_kwargs['emoji_id'])
+                except discord.errors.NotFound:
+                    pass
+            summary += TICKET_CONFIG_SUMMARY.format(**t_kwargs)
 
-__Practice__
-Practice Channel: {practice}
-Practice Role: {practice_role}
-        """.format(**kwargs)
+        return summary
+
+    async def execute(self):
+        """
+        Execute all admin tasks here.
+        """
+        if not [x for x in self.msg.author.roles if x.name == ADMIN_ROLE]:
+            raise tick.exc.InvalidPerms("You are not a `Ticket Supervisor`. Please see an admin.")
+
+        guild = self.msg.guild
+        try:
+            guild_config = tickdb.query.get_guild_config(self.session, guild.id)
+        except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound):
+            guild_config = tickdb.schema.GuildConfig(id=guild.id)
+            self.session.add(guild_config)
+            self.session.commit()
+            self.log.debug("Creating config for server: %s with id %d", guild.name, guild.id)
+        self.log.info("Requested config of: %d\nFound: %s", guild.id, guild_config)
+
+        resp = None
+        try:
+            func = getattr(self, self.args.subcmd)
+            resp = await func()
+            self.session.commit()
+        except TypeError:
+            resp = "Please see --help for command. Invalid selection."
+
+        if resp:
+            await self.msg.channel.send(resp)
+
+
+#  class Admin(Action):
+    #  """
+    #  Provide the ticket command.
+    #  """
+    #  async def active(self, guild_config):
+        #  """
+        #  Set the target category to create new tickets under.
+        #  Cannot mention categories so pass a substring that is unique.
+
+        #  Args:
+            #  guild_config: The guild configuration to update.
+        #  """
+        #  _, three_ago, seven_ago = tickdb.query.get_active_tickets(self.session, guild_config.id)
+
+        #  msg = "__Tickets No Activity 7 Days__\n"
+        #  lines = [['Ticket Channel', 'Date']] + \
+            #  [[tick.channel_name, tick.last_msg] for tick in seven_ago]
+        #  msg += tick.tbl.wrap_markdown(tick.tbl.format_table(lines, header=True))
+        #  await self.msg.channel.send(msg)
+
+        #  msg = "\n\n__Tickets No Activity 3 Days__\n"
+        #  lines = [['Ticket Channel', 'Date']] + \
+            #  [[tick.channel_name, tick.last_msg] for tick in three_ago]
+        #  msg += tick.tbl.wrap_markdown(tick.tbl.format_table(lines, header=True))
+        #  await self.msg.channel.send(msg)
+
+    #  async def category(self, guild_config):
+        #  """
+        #  Set the target category to create new tickets under.
+        #  Cannot mention categories so pass a substring that is unique.
+
+        #  Args:
+            #  guild_config: The guild configuration to update.
+        #  """
+        #  substr = ' '.join(self.args.name).lower()
+        #  matches = [x for x in self.msg.guild.categories if substr in x.name.lower()]
+        #  if not matches or len(matches) != 1:
+            #  raise tick.exc.InvalidCommandArgs("Could not match exactly 1 category. Try again!")
+        #  cat = matches[0]
+
+        #  if not DISCORD_PERMS['ticket_required'].is_subset(cat.permissions_for(cat.guild.me)):
+            #  perms = """
+        #  Read Messages
+        #  Manage Channels
+        #  Add Reactions"""
+            #  raise tick.exc.InvalidPerms(PERMS_TEMPLATE.format("Ticket Category Channel", perms))
+
+        #  guild_config.category_channel_id = cat.id
+        #  self.session.add(guild_config)
+        #  self.log.debug("Matched Category '%s' for guild %s", cat.name, cat.guild)
+
+        #  return "Setting new tickets to be created under category:\n\n**%s**" % cat.name
+
+    #  async def logs(self, guild_config):
+        #  """
+        #  Set the target logging channel.
+
+        #  Args:
+            #  guild_config: The guild configuration to update.
+        #  """
+        #  channel = self.msg.channel_mentions[0]
+        #  if not DISCORD_PERMS['log_required'].is_subset(channel.permissions_for(channel.guild.me)):
+            #  perms = """
+        #  Read Messages
+        #  Send Messages
+        #  Attach Files"""
+            #  raise tick.exc.InvalidPerms(PERMS_TEMPLATE.format("Log Channel", perms))
+
+        #  guild_config.log_channel_id = channel.id
+        #  self.session.add(guild_config)
+
+        #  return "Setting the logging channel to:\n\n**%s**" % channel.name
+
+    #  async def support(self, guild_config):
+        #  """
+        #  Set the support pinned message to react to for support.
+
+        #  Args:
+            #  guild_config: The guild configuration to update.
+        #  """
+        #  channel = self.msg.channel_mentions[0]
+
+        #  if not DISCORD_PERMS['support_required'].is_subset(channel.permissions_for(channel.guild.me)):
+            #  perms = """
+        #  Read Messages
+        #  Send Messages
+        #  Manage Messages
+        #  Add Reactions"""
+            #  raise tick.exc.InvalidPerms(PERMS_TEMPLATE.format("Support Channel", perms))
+
+        #  sent = await channel.send(TICKET_PIN_MSG.format(emoji=PIN_EMOJI))
+        #  await sent.pin()
+        #  await sent.add_reaction(PIN_EMOJI)
+
+        #  guild_config.support_channel_id = sent.channel.id
+        #  guild_config.support_pin_id = sent.id
+
+        #  await asyncio.sleep(2)
+        #  to_delete = []
+        #  async for msg in channel.history(limit=10):
+            #  if msg.type == discord.MessageType.pins_add:
+                #  to_delete += [msg]
+        #  try:
+            #  await channel.delete_messages(to_delete)
+        #  except discord.NotFound:
+            #  pass
+
+        #  await self.bot.send_ttl_message(channel, SUPPORT_PIN_NOTICE, ttl=5)
+
+    #  async def practice_support(self, guild_config):
+        #  """
+        #  Set the practice pinned message to react to for support practice sessions.
+
+        #  Args:
+            #  guild_config: The guild configuration to update.
+        #  """
+        #  channel = self.msg.channel_mentions[0]
+
+        #  if not DISCORD_PERMS['support_required'].is_subset(channel.permissions_for(channel.guild.me)):
+            #  perms = """
+        #  Read Messages
+        #  Send Messages
+        #  Manage Messages
+        #  Add Reactions"""
+            #  raise tick.exc.InvalidPerms(PERMS_TEMPLATE.format("Support Channel", perms))
+
+        #  sent = await channel.send(TICKET_PIN_MSG.format(emoji=PIN_EMOJI))
+        #  await sent.pin()
+        #  await sent.add_reaction(PIN_EMOJI)
+
+        #  guild_config.practice_channel_id = sent.channel.id
+        #  guild_config.practice_pin_id = sent.id
+
+        #  await asyncio.sleep(2)
+        #  to_delete = []
+        #  async for msg in channel.history(limit=10):
+            #  if msg.type == discord.MessageType.pins_add:
+                #  to_delete += [msg]
+        #  try:
+            #  await channel.delete_messages(to_delete)
+        #  except discord.NotFound:
+            #  pass
+
+        #  await self.bot.send_ttl_message(channel, SUPPORT_PIN_NOTICE, ttl=5)
+
+    #  async def role(self, guild_config):
+        #  """
+        #  Set the role to ping for tickets.
+
+        #  Args:
+            #  guild_config: The guild configuration to update.
+        #  """
+        #  role = self.msg.role_mentions[0]
+
+        #  guild_config.role_id = role.id
+        #  self.session.add(guild_config)
+
+        #  return "Setting tickets to ping:\n\n**%s**" % role.name
+
+    #  async def adult_role(self, guild_config):
+        #  """
+        #  Set the role to ping for adult tickets.
+
+        #  Args:
+            #  guild_config: The guild configuration to update.
+        #  """
+        #  role = self.msg.role_mentions[0]
+
+        #  guild_config.adult_role_id = role.id
+        #  self.session.add(guild_config)
+
+        #  return "Setting adult tickets to ping:\n\n**%s**" % role.name
+
+    #  async def practice_role(self, guild_config):
+        #  """
+        #  Set the role to ping for practice tickets.
+
+        #  Args:
+            #  guild_config: The guild configuration to update.
+        #  """
+        #  role = self.msg.role_mentions[0]
+
+        #  guild_config.practice_role_id = role.id
+        #  self.session.add(guild_config)
+
+        #  return "Setting practice tickets to ping:\n\n**%s**" % role.name
+
+    #  async def overseer_roles(self, guild_config):
+        #  """
+        #  Set the role(s) that can oversee active tickets.
+
+        #  Args:
+            #  guild_config: The guild configuration to update.
+        #  """
+        #  role_ids = ",".join([str(x.id) for x in self.msg.role_mentions])
+        #  if len(role_ids) > tickdb.schema.LEN_OVERSEER:
+            #  raise tick.exc.InvalidCommandArgs("Choose less roles or see admin for more storage.")
+
+        #  guild_config.overseer_role_ids = role_ids
+        #  self.session.add(guild_config)
+
+        #  role_names = "\n".join([str(x.name) for x in self.msg.role_mentions])
+        #  return "Setting overseer roles to:\n\n**%s**" % role_names
+
+    #  async def summary(self, guild_config):
+        #  """
+        #  Summarize the current settings for the bot.
+
+        #  Args:
+            #  guild_config: The guild configuration to update.
+        #  """
+        #  guild = self.msg.guild
+        #  default = '**Not set**'
+
+        #  overseer_roles = default
+        #  if guild_config.overseer_role_ids:
+            #  overseer_roles = "\n"
+            #  for r_id in guild_config.overseer_role_ids.split(','):
+                #  overseer_roles += "  - " + getattr(guild.get_role(int(r_id)), 'name', default) + "\n"
+
+        #  kwargs = {
+            #  'adult_role': getattr(guild.get_role(guild_config.adult_role_id), 'name', default),
+            #  'regular_role': getattr(guild.get_role(guild_config.role_id), 'name', default),
+            #  'logs': getattr(self.msg.guild.get_channel(guild_config.log_channel_id), 'mention', default),
+            #  'support': getattr(self.msg.guild.get_channel(guild_config.support_channel_id), 'mention', default),
+            #  'overseer_roles': overseer_roles,
+            #  'category': getattr(self.msg.guild.get_channel(guild_config.category_channel_id), 'mention', default),
+            #  'practice_role': getattr(guild.get_role(guild_config.practice_role_id), 'name', default),
+            #  'practice': getattr(self.msg.guild.get_channel(guild_config.practice_channel_id), 'mention', default),
+        #  }
+
+        #  return """
+#  __Live__
+#  Ticket Category: {category}
+#  Support Channel: {support}
+#  Log Channel: {logs}
+#  Adult Role: {adult_role}
+#  Regular Role: {regular_role}
+#  Overseer Role(s): {overseer_roles}
+
+#  __Practice__
+#  Practice Channel: {practice}
+#  Practice Role: {practice_role}
+        #  """.format(**kwargs)
 
     async def del_question(self, _):
         """
@@ -1179,26 +1432,3 @@ async def wait_for_user_reaction(client, chan, author, text, *, yes=YES_EMOJI, n
     react, _ = await client.wait_for('reaction_add', check=check, timeout=RESPONSE_TIMEOUT)
 
     return str(react) == yes, msg
-
-
-async def bot_shutdown(bot):  # pragma: no cover
-    """
-    Shutdown the bot. Gives background jobs grace window to finish  unless empty.
-    """
-    logging.getLogger(__name__).error('FINAL SHUTDOWN REQUESTED')
-    await bot.logout()
-
-
-def user_info(user):  # pragma: no cover
-    """
-    Trivial message formatter based on user information.
-    """
-    lines = [
-        ['Username', '{}#{}'.format(user.name, user.discriminator)],
-        ['ID', str(user.id)],
-        ['Status', str(user.status)],
-        ['Join Date', str(user.joined_at)],
-        ['All Roles:', str([str(role) for role in user.roles[1:]])],
-        ['Top Role:', str(user.top_role).replace('@', '@ ')],
-    ]
-    return '**' + user.display_name + '**\n' + tick.tbl.wrap_markdown(tick.tbl.format_table(lines))

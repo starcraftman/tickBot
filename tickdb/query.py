@@ -5,7 +5,7 @@ import datetime
 
 import sqlalchemy as sqla
 
-from tickdb.schema import (Ticket, GuildConfig, Question)
+from tickdb.schema import (Ticket, GuildConfig, TicketText)
 import tickdb.schema
 
 
@@ -50,61 +50,13 @@ def get_ticket(session, guild_id, *, user_id=None, channel_id=None):
 
 async def get_active_tickets(session, guild):
     """
-    Get all tickets currently active.
-    Also get a list of tickets will no activity in last 3 days and 7 days.
-    Tickets will be live updated with following information:
-        channel_name -> channel name
-        last_msg -> datetime of last message sent
+    Get all tickets for the guild.
 
     Args:
         session: Session to the db.
         guild: The guild being examined.
 
     Returns:
-        (all_ticks, three_days, seven_days)
         all_ticks: All tickets currently in system for guild.
     """
-    three_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=3)
-    seven_ago = datetime.datetime.now(datetime.timezone.utc) - datetime.timedelta(days=7)
-
-    all_ticks, three_days, seven_days = [], [], []
-    for tick in session.query(Ticket).filter(Ticket.guild_id == guild.id).all():
-        channel = await guild.get_channel(tick.channel_id)
-        async for msg in channel.history(limit=1):
-            last_sent = msg
-        tick.last_msg = last_sent.created_at
-        tick.channel_name = channel.name
-
-        if last_sent.created_at < seven_ago:
-            seven_days += [tick]
-        elif last_sent.created_at < three_ago:
-            three_days += [tick]
-        all_ticks += [tick]
-
-    return (all_ticks, three_days, seven_days)
-
-
-def get_question_by_id(session, *, id=1):
-    """
-    Get an existing Question by ID, if it doesn't exist create it.
-
-    Returns:
-        A Question object requestion.
-    """
-    try:
-        question = session.query(Question).\
-            filter(Question.id == id).\
-            one()
-    except sqla.orm.exc.NoResultFound:
-        question = Question(id=id)
-        session.add(question)
-        session.commit()
-
-    return question
-
-
-def get_all_questions(session):
-    """
-    Get all the currently set messages.
-    """
-    return session.query(Question).order_by(Question.id).all()
+    return session.query(Ticket).filter(Ticket.guild_id == guild.id).all();
