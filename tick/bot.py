@@ -147,37 +147,56 @@ class TickBot(discord.Client):
         """ Called when emojis change, just update all emojis. """
         self.emoji.update(self.guilds)
 
-    #  async def on_raw_reaction_add(self, payload):
-        #  """
-        #  Monitor reactions on pinned messages for support.
-        #  When reactions are added, initiate a new request for support.
-        #  """
-        #  try:
-            #  chan = self.get_channel(payload.channel_id)
-            #  if isinstance(chan, discord.DMChannel) or payload.member == self.user:
-                #  return
+    async def on_raw_reaction_add(self, payload):
+        """Monitor reactions on pinned messages for support.
+        When reactions are added, initiate a new request for support.
 
-            #  config = tickdb.query.get_guild_config(tickdb.Session(), chan.guild.id)
-            #  coro = None
-            #  msg = await chan.fetch_message(payload.message_id)
+        https://discordpy.readthedocs.io/en/latest/api.html#discord.RawReactionActionEvent
 
-            #  if ((config.support_pin_id and msg.id == config.support_pin_id)
-                    #  or (config.practice_pin_id and msg.id == config.practice_pin_id)):
-                #  for reaction in msg.reactions:
-                    #  if str(reaction) == tick.actions.PIN_EMOJI and reaction.count > 1:
-                        #  await reaction.remove(payload.member)
-                        #  if msg.id == config.support_pin_id:
-                            #  coro = tick.actions.ticket_request(self, chan, payload.member, config)
-                        #  elif msg.id == config.practice_pin_id:
-                            #  coro = tick.actions.practice_ticket_request(self, chan, payload.member, config)
-                    #  elif str(reaction) != tick.actions.PIN_EMOJI:
-                        #  await reaction.clear()
-            #  if coro:
-                #  await coro
-        #  except (sqlalchemy.orm.exc.NoResultFound, discord.errors.NotFound):
-            #  pass
-        #  except tick.exc.UserException as exc:
-            #  await self.send_ttl_message(chan, exc.reply(), ttl=10)
+        Args:
+            payload: The RawReactionActionEvent, has following attributes:
+                channel_id
+                emoji
+                event_type
+                guild_id
+                member
+                message_id
+                user_id
+        """
+        try:
+            chan = self.get_channel(payload.channel_id)
+            if isinstance(chan, discord.DMChannel) or payload.member == self.user:
+                return
+
+            guild = self.get_guild(payload.guild_id)
+            msg = await chan.fetch_message(payload.message_id)
+            ticket_config = tickdb.query.get_ticket_config(tickdb.Session(), payload.guild_id, payload.emoji.id)
+            if ticket_config and msg.id == ticket_config.guild.pinned_message_id:
+                perms_map = tick.actions.DISCORD_PERMS
+                to_update = {
+                    guild.default_role: perms_map['nothing'],
+                    guild.me: perms_map['bot'],
+                    payload.member: perms_map['user'],
+                }
+                to_update.update(
+                    {chan.guild.get_role(x.role_id): perms_map['user'] for x in ticket_config.roles}
+                )
+                chan.overwrites.update(to_update)
+
+                time = datetime.datetime.utcnow().strftime("%H%M")
+                ticket_name = f"{ticket_config.prefix}_{payload.member.name:.10}_{time}"
+                ticket_category = self.get_channel(ticket_config.guild.category_channel_id)
+                ticket_channel = await guild.create_text_channel(name=ticket_name,
+                                                                 topic="A private ticket for {}".format(payload.member.name),
+                                                                 overwrites=chan.overwrites,
+                                                                 category=ticket_category)
+
+                # Initiate ticket flow here
+                await tick.actions.new_ticket_request(self, ticket_channel, payload.member, ticket_config)
+        except (sqlalchemy.orm.exc.NoResultFound, discord.errors.NotFound):
+            pass
+        except tick.exc.UserException as exc:
+            await self.send_ttl_message(chan, exc.reply(), ttl=10)
 
     async def on_ready(self):
         """
@@ -345,7 +364,7 @@ def main():  # pragma: no cover
         # BLOCKING: N.o. e.s.c.a.p.e.
         loop.run_until_complete(tick.util.BOT.start(token))
     except KeyboardInterrupt:
-        loop.run_until_complete(tick.util.BOT.logout())
+        loop.run_until_complete(tick.util.BOT.close())
     finally:
         loop.close()
 

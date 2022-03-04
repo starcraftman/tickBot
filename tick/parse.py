@@ -71,11 +71,10 @@ To setup run in following order:
         Configuration of individual tickets will come after this pin.
 {prefix}admin ticket_setup [name]
         Run through interactive configuration for one ticket flow on guild.
-{prefix}admin show_questions [name]
-        Run through the questions for a ticket with [name].
-        You will be able to edit or delete existing or add new ones.
-{prefix}admin edit_questions [name]
-        You will be able to edit or delete existing questions or add new ones.
+{prefix}admin ticket_remove [name]
+        Remove a ticket flow, all questions and the config will be purged.
+{prefix}admin ticket_questions [name]
+        You will be able to view, edit or delete existing questions or add new ones.
 {prefix}admin summary
         List the current configuration for the guild's tickets.
     """.format(prefix=prefix)
@@ -84,12 +83,14 @@ To setup run in following order:
     tick_subs = sub.add_subparsers(title='subcommands',
                                    description='admin subcommands', dest='subcmd')
 
-    tick_sub = tick_subs.add_parser('ticket_setup', help='Configure an individual ticket.')
-    tick_sub.add_argument('name', help='The unique substring of the category.')
     tick_sub = tick_subs.add_parser('guild_setup', help='Perform interactive guild configuration.')
     tick_sub = tick_subs.add_parser('pin', help='Create the main support pin.')
-    tick_sub = tick_subs.add_parser('ticket_questions', help='Create the main support pin.')
-    tick_sub.add_argument('name', help='The unique substring of the category.')
+    tick_sub = tick_subs.add_parser('ticket_setup', help='Configure an individual ticket.')
+    tick_sub.add_argument('name', help='The unique name of the ticket config.')
+    tick_sub = tick_subs.add_parser('ticket_remove', help='Remove an individual ticket and questions.')
+    tick_sub.add_argument('name', help='The unique name of the ticket config.')
+    tick_sub = tick_subs.add_parser('questions', help='Create the main support pin.')
+    tick_sub.add_argument('name', help='The unique name of the ticket config.')
     tick_sub = tick_subs.add_parser('summary', help='Show the current configuration.')
 
 
@@ -113,11 +114,9 @@ def subs_ticket(subs, prefix):
                                    description='Ticket subcommands', dest='subcmd')
 
     tick_sub = tick_subs.add_parser('close', help='Close a ticket.')
-    tick_sub.add_argument('reason', nargs='+', help='The name of the ticket.')
-    tick_sub = tick_subs.add_parser('rename', help='ate a new ticket.')
-    tick_sub.add_argument('name', nargs='+', help='The name of the ticket.')
-    tick_sub = tick_subs.add_parser('review', help='Get a responder to review.')
-    tick_sub = tick_subs.add_parser('swap', help='Get a new responder.')
+    tick_sub.add_argument('reason', nargs='*', default=["Ticket over."], help='The reason to close the ticket.')
+    tick_subs.add_parser('review', help='Get a responder to review.')
+    tick_subs.add_parser('unclaim', help='Get a new responder.')
 
 
 @register_parser

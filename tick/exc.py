@@ -61,6 +61,11 @@ class InvalidPerms(UserException):
     pass
 
 
+class InvalidInput(UserException):
+    """ User provided invalid input. """
+    pass
+
+
 def log_format(*, content, author, channel):
     """ Log useful information from discord.py """
     msg = "{aut} sent {cmd} from {cha}/{srv}"

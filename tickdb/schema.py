@@ -3,6 +3,7 @@ Define the database schema and some helpers.
 
 N.B. Schema defaults only applied once object commited.
 """
+import datetime
 import sqlalchemy as sqla
 import sqlalchemy.ext.declarative
 
@@ -13,7 +14,7 @@ import tickdb
 LEN_ROLE = 100
 LEN_TEXT = 1500
 LEN_TICKET_NAME = 20
-LEN_TICKET_PREFIX = 10
+LEN_TICKET_PREFIX = 20
 DEFAULT_TICKET_TIMEOUT = 7200
 Base = sqlalchemy.ext.declarative.declarative_base()
 
@@ -64,13 +65,16 @@ class TicketConfig(Base):
         'GuildConfig', lazy='select', uselist=False, back_populates='ticket_configs',
     )
     questions = sqla.orm.relationship(
-        'TicketConfigText', lazy='select', uselist=False, back_populates='ticket_config',
+        'TicketConfigText', lazy='select', uselist=True, back_populates='ticket_config',
+        cascade="all, delete-orphan",
     )
     roles = sqla.orm.relationship(
         'TicketConfigRole', lazy='select', uselist=True, back_populates='ticket_config',
+        cascade="all, delete-orphan",
     )
     tickets = sqla.orm.relationship(
         'Ticket', lazy='select', uselist=True, back_populates='ticket_config',
+        cascade="all, delete-orphan",
     )
 
     id = sqla.Column(sqla.BigInteger, primary_key=True)
@@ -153,7 +157,7 @@ class TicketConfigText(Base):
 
     id = sqla.Column(sqla.BigInteger, primary_key=True)
     ticket_config_id = sqla.Column(sqla.BigInteger, sqla.ForeignKey('ticket_configs.id'))
-    text_num = sqla.Column(sqla.Integer, default=1)
+    num = sqla.Column(sqla.Integer, default=1)
     text = sqla.Column(sqla.String(LEN_TEXT))
 
     ticket_config = sqla.orm.relationship(
@@ -161,27 +165,27 @@ class TicketConfigText(Base):
     )
 
     def __repr__(self):
-        keys = ['id', 'ticket_config_id', 'text_num', 'text']
+        keys = ['id', 'ticket_config_id', 'num', 'text']
         kwargs = ['{}={!r}'.format(key, getattr(self, key)) for key in keys]
 
         return "{}({})".format(self.__class__.__name__, ', '.join(kwargs))
 
     def __str__(self):
-        return "{id}) {text}".format(id=self.text_num, text=self.text)
+        return "{id}) {text}".format(id=self.num, text=self.text)
 
     def __eq__(self, other):
         return isinstance(other, TicketConfigText) and self.id == other.id
 
-    @sqla.orm.validates('text_num')
-    def validate_text_num(self, key, value):
+    @sqla.orm.validates('num')
+    def validate_num(self, key, value):
         """
         Numbers must be valid.
         """
         try:
-            if self.text_num < 1:
-                raise ValueError("TicketTex.text_num must be >= 1")
+            if value < 0:
+                raise ValueError("TicketTex.num must be >= 0.")
         except TypeError:
-            raise ValueError("TicketText.text_num must be an integer.")
+            raise ValueError("TicketText.num must be an integer.")
 
         return value
 
@@ -213,9 +217,9 @@ class Ticket(Base):
     user_id = sqla.Column(sqla.BigInteger)
     responder_id = sqla.Column(sqla.BigInteger)
     channel_id = sqla.Column(sqla.BigInteger, unique=True)
-    created_at = sqla.Column(sqla.DateTime, onupdate=sqla.func.now)
-    updated_at = sqla.Column(sqla.DateTime, onupdate=sqla.func.now)
-    closed_at = sqla.Column(sqla.DateTime, onupdate=sqla.func.now)
+    created_at = sqla.Column(sqla.DateTime, default=datetime.datetime.utcnow)
+    updated_at = sqla.Column(sqla.DateTime, default=datetime.datetime.utcnow, onupdate=datetime.datetime.utcnow)
+    closed_at = sqla.Column(sqla.DateTime)
 
     guild = sqla.orm.relationship(
         'GuildConfig', lazy='select', uselist=False, back_populates='tickets',
@@ -225,6 +229,7 @@ class Ticket(Base):
     )
     texts = sqla.orm.relationship(
         'TicketText', lazy='select', uselist=True, back_populates='ticket',
+        cascade="all, delete-orphan",
     )
 
     def __repr__(self):
@@ -252,7 +257,7 @@ class TicketText(Base):
 
     id = sqla.Column(sqla.BigInteger, primary_key=True)
     ticket_id = sqla.Column(sqla.BigInteger, sqla.ForeignKey('tickets.id'))
-    text_num = sqla.Column(sqla.Integer, default=1)
+    num = sqla.Column(sqla.Integer, default=1)
     text = sqla.Column(sqla.String(LEN_TEXT))
 
     ticket = sqla.orm.relationship(
@@ -260,27 +265,27 @@ class TicketText(Base):
     )
 
     def __repr__(self):
-        keys = ['id', 'ticket_id', 'text_num', 'text']
+        keys = ['id', 'ticket_id', 'num', 'text']
         kwargs = ['{}={!r}'.format(key, getattr(self, key)) for key in keys]
 
         return "{}({})".format(self.__class__.__name__, ', '.join(kwargs))
 
     def __str__(self):
-        return "{id}) {text}".format(id=self.text_num, text=self.text)
+        return "{id}) {text}".format(id=self.num, text=self.text)
 
     def __eq__(self, other):
         return isinstance(other, TicketConfigText) and self.id == other.id
 
-    @sqla.orm.validates('text_num')
-    def validate_text_num(self, key, value):
+    @sqla.orm.validates('num')
+    def validate_num(self, key, value):
         """
         Numbers must be valid.
         """
         try:
-            if self.text_num < 1:
-                raise ValueError("TicketText.text_num must be >= 1")
+            if value < 0:
+                raise ValueError("TicketText.num must be >= 0")
         except TypeError:
-            raise ValueError("TicketText.text_num must be an integer.")
+            raise ValueError("TicketText.num must be an integer.")
 
         return value
 
