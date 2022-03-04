@@ -6,7 +6,6 @@ All actions have async execute methods.
 import asyncio
 import logging
 import os
-import re
 import shutil
 import tempfile
 import traceback
@@ -357,7 +356,8 @@ You can always edit this pin message later without breaking the bot."""
                 emoji = await self.msg.guild.fetch_emoji(ticket_config.emoji_id)
                 await resp.add_reaction(emoji)
             guild_config.pinned_message_id = resp.id
-            return "Pinning your message now. Add ticket flows with: {.prefix}admin ticket_setup".format(self.bot)
+
+            return f"Pinning your message. Add ticket flows with: **{self.bot.prefix}admin ticket_setup** name_of_tickets"
 
     async def guild_setup(self, guild_config):
         """
@@ -408,7 +408,7 @@ You can always edit this pin message later without breaking the bot."""
                     await chan.send("Setting tickets category to: {}".format(resp_channel.name))
                     break
 
-        await chan.send("Configuration completed! Please now use: {.prefix}admin pin".format(client))
+        return f"Configuration completed! Create the main ticket pin with: **{client.prefix}admin pin**"
 
     async def ticket_setup(self, guild_config):
         """
@@ -427,10 +427,10 @@ You can always edit this pin message later without breaking the bot."""
             Notable: e.emoji, e.member, e.message_id, e.channel_id
             https://discordpy.readthedocs.io/en/stable/api.html#discord.RawReactionActionEvent
             """
-            return (event.channel_id == self.msg.channel.id and
-                    event.member == self.msg.author and
-                    event.emoji and
-                    event.emoji.id)
+            return (event.channel_id == self.msg.channel.id
+                    and event.member == self.msg.author
+                    and event.emoji
+                    and event.emoji.id)
 
         check_msg = create_msg_checker(self.msg)
         setup_intro = """Creating or updating a ticket flow called: {}.
@@ -496,10 +496,11 @@ Please type a unique prefix of lenth < {} for ticket channels.""".format(ticket_
                 await chan.send("Setting roles to the following:\n{}".format(role_text))
                 break
 
-        await chan.send("Ticket flow completed. Making reaction.")
         ticket_chan = self.msg.guild.get_channel(guild_config.ticket_channel_id)
         pinned = await ticket_chan.fetch_message(guild_config.pinned_message_id)
         await pinned.add_reaction(event.emoji)
+
+        return f"Ticket flow completed. Reaction added to pin. To setup questions: **{self.bot.prefix}admin questions {ticket_config.name}**"
 
     async def ticket_remove(self, guild_config):
         """
@@ -730,21 +731,22 @@ class Ticket(Action):
         mentions = " ".join([chan.guild.get_role(x.role_id).mention for x in ticket.ticket_config.roles])
         user = chan.guild.get_member(ticket.user_id)
         old_responder = chan.guild.get_member(ticket.responder_id)
+
+        jump_url = "No jump set."
         for msg in (await chan.pins()):
             if "private ticket" in msg.content:
                 continue
-
-            first_question = msg
+            jump_url = msg.jump_url
 
         def check_reaction(event):
             """
             Notable: e.emoji, e.member, e.message_id, e.channel_id
             https://discordpy.readthedocs.io/en/stable/api.html#discord.RawReactionActionEvent
             """
-            return (event.channel_id == chan.id and
-                    event.member != user and
-                    event.member != self.bot.user and
-                    str(event.emoji) == EMOJIS['_yes'])
+            return (event.channel_id == chan.id
+                    and event.member != user
+                    and event.member != self.bot.user
+                    and str(event.emoji) == EMOJIS['_yes'])
 
         self.log.info("Ticket is unclaimed: %s", chan.name)
 
@@ -754,7 +756,7 @@ class Ticket(Action):
         chan.overwrites.update(to_update)
         await chan.edit(reason="Set ticket to unclaimed.", overwrites=chan.overwrites)
 
-        msg = await chan.send(TICKET_UNCLAIMED.format(jump_url=first_question.jump_url, mentions=mentions))
+        msg = await chan.send(TICKET_UNCLAIMED.format(jump_url=jump_url, mentions=mentions))
         await msg.add_reaction(EMOJIS['_yes'])
         resp = await self.bot.wait_for('raw_reaction_add', check=check_reaction)
         responder = resp.member
@@ -788,22 +790,23 @@ class Ticket(Action):
         mentions = " ".join([chan.guild.get_role(x.role_id).mention for x in ticket.ticket_config.roles])
         user = chan.guild.get_member(ticket.user_id)
         old_responder = chan.guild.get_member(ticket.responder_id)
+
+        jump_url = "No jump set."
         for msg in (await chan.pins()):
             if "private ticket" in msg.content:
                 continue
-
-            first_question = msg
+            jump_url = msg.jump_url
 
         def check_reaction(event):
             """
             Notable: e.emoji, e.member, e.message_id, e.channel_id
             https://discordpy.readthedocs.io/en/stable/api.html#discord.RawReactionActionEvent
             """
-            return (event.channel_id == chan.id and
-                    event.member != user and
-                    event.member != old_responder and
-                    event.member != self.bot.user and
-                    str(event.emoji) == EMOJIS['_yes'])
+            return (event.channel_id == chan.id
+                    and event.member != user
+                    and event.member != old_responder
+                    and event.member != self.bot.user
+                    and str(event.emoji) == EMOJIS['_yes'])
 
         self.log.info("Ticket review is unclaimed: %s", chan.name)
 
@@ -812,7 +815,7 @@ class Ticket(Action):
         chan.overwrites.update(to_update)
         await chan.edit(reason="Set ticket review unclaimed.", overwrites=chan.overwrites)
 
-        msg = await chan.send(TICKET_REVIEW.format(jump_url=first_question.jump_url, mentions=mentions))
+        msg = await chan.send(TICKET_REVIEW.format(jump_url=jump_url, mentions=mentions))
         await msg.add_reaction(EMOJIS['_yes'])
         resp = await self.bot.wait_for('raw_reaction_add', check=check_reaction)
         responder = resp.member
@@ -922,13 +925,16 @@ async def new_ticket_request(client, chan, user, ticket_config):
         Notable: e.emoji, e.member, e.message_id, e.channel_id
         https://discordpy.readthedocs.io/en/stable/api.html#discord.RawReactionActionEvent
         """
-        print(event.emoji)
-        print(event.member)
-        return (event.channel_id == chan.id and
-                #  event.member != user and
-                event.member != client.user and
-                str(event.emoji) == EMOJIS['_yes'])
+        return (event.channel_id == chan.id
+                and event.member != user
+                and event.member != client.user
+                and str(event.emoji) == EMOJIS['_yes'])
 
+    log_channel = chan.guild.get_channel(ticket_config.guild_config.log_channel_id)
+    await log_channel.send(
+        LOG_TEMPLATE.format(action="Ticket Created", user=user.name,
+                            msg=f"{ticket_config.name} ticket created.")
+    )
     msg = await chan.send(TICKET_DIRECTIONS.format(prefix=client.prefix))
     await msg.pin()
     with tickdb.session_scope(tickdb.Session) as session:
@@ -942,18 +948,18 @@ async def new_ticket_request(client, chan, user, ticket_config):
         session.commit()
 
         pin_first = True
-        first_question = None
+        jump_url = "No jump set."
         for question in ticket_config.questions:
             msg = await chan.send(question)
             if pin_first:
                 pin_first = False
-                first_question = msg
+                jump_url = msg.jump_url
                 await msg.pin()
             resp = await client.wait_for('message', check=check_msg)
             tickdb.query.add_ticket_response(session, ticket, resp.content)
 
         mentions = " ".join([chan.guild.get_role(x.role_id).mention for x in ticket_config.roles])
-        msg = await chan.send(TICKET_UNCLAIMED.format(jump_url=first_question.jump_url, mentions=mentions))
+        msg = await chan.send(TICKET_UNCLAIMED.format(jump_url=jump_url, mentions=mentions))
         await msg.add_reaction(EMOJIS['_yes'])
         resp = await client.wait_for('raw_reaction_add', check=check_reaction)
         ticket.responder_id = resp.member.id
@@ -963,6 +969,11 @@ async def new_ticket_request(client, chan, user, ticket_config):
         to_update[resp.member] = DISCORD_PERMS['user']
         chan.overwrites.update(to_update)
         await chan.edit(reason="Set ticket to claimed.", overwrites=chan.overwrites)
+
+        await log_channel.send(
+            LOG_TEMPLATE.format(action="Ticket Taken", user=user.name,
+                                msg="__Responder:__ {}".format(resp.member.name)),
+        )
         await chan.send('Hope your new responder {} can help. Take care!'.format(resp.member.mention))
 
 
