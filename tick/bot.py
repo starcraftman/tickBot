@@ -191,6 +191,8 @@ class TickBot(discord.Client):
                                                                  overwrites=chan.overwrites,
                                                                  category=ticket_category)
 
+                await msg.remove_reaction(payload.emoji, payload.member)
+
                 # Initiate ticket flow here
                 await tick.actions.new_ticket_request(self, ticket_channel, payload.member, ticket_config)
         except (sqlalchemy.orm.exc.NoResultFound, discord.errors.NotFound):
