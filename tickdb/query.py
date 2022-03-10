@@ -1,11 +1,10 @@
 """
 Module should handle logic related to querying/manipulating tables from a high level.
 """
-import sqlalchemy as sqla
 import sqlalchemy.orm.exc as sqla_oexc
 
-from tickdb.schema import (GuildConfig, TicketConfig, TicketConfigText, TicketConfigRole, Ticket, TicketText)
-import tickdb.schema
+from tickdb.schema import (GuildConfig, TicketConfig, TicketConfigText,
+                           TicketConfigRole, Ticket, TicketText)
 
 
 def get_guild_config(session, guild_id):
@@ -126,3 +125,12 @@ async def get_active_tickets(session, guild):
         all_ticks: All tickets currently in system for guild.
     """
     return session.query(Ticket).filter(Ticket.guild_id == guild.id).all()
+
+
+async def get_all_guild_configs(session):
+    """Return all active guild configurations.
+
+    Args:
+        session: Session to the db.
+    """
+    return session.query(GuildConfig).all()

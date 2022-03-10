@@ -73,7 +73,7 @@ To setup run in following order:
         Run through interactive configuration for one ticket flow on guild.
 {prefix}admin ticket_remove [name]
         Remove a ticket flow, all questions and the config will be purged.
-{prefix}admin ticket_questions [name]
+{prefix}admin questions [name]
         You will be able to view, edit or delete existing questions or add new ones.
 {prefix}admin summary
         List the current configuration for the guild's tickets.

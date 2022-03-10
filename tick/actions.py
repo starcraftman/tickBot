@@ -4,6 +4,7 @@ hierarchy of actions that can be recombined in any order.
 All actions have async execute methods.
 """
 import asyncio
+import datetime
 import logging
 import os
 import shutil
@@ -30,10 +31,10 @@ EMOJIS = tick.util.get_config('emojis')
 
 MAX_QUESTION_LEN = 500  # characters
 QUESTIONS_CANCEL = "cancel"
-QUESTION_LENGTH_TOO_MUCH = """The response to the question was too long.
-Please answer again with a message < {} characters long.
+QUESTION_LENGTH_TOO_MUCH = f"""The response to the question was too long.
+Please answer again with a message < {MAX_QUESTION_LEN} characters long.
 
-To cancel any time, just reply with: **{}**""".format(MAX_QUESTION_LEN, QUESTIONS_CANCEL)
+To cancel any time, just reply with: **{QUESTIONS_CANCEL}**"""
 NAME_TEMPLATE = "{id}-{user:.5}-{taker:.5}"
 
 PERMS_TEMPLATE = """This bot requires following perms for requested channel:
@@ -53,72 +54,6 @@ TRANSCRIPT_ENTRY = """{date} {author} ({id})
 LOG_TEMPLATE = """__Action__: {action}
 __User__: {user}
 {msg}
-"""
-TICKET_PIN_MSG = """
-To request a ticket react with {emoji} below.
-
-A ticket is a private support session with a supporter who will try their best to help you.
-You will be asked some questions to help narrow things down, respond as best you can.
-Please be patient once a ping is made, response time varies depending on availability.
-"""
-PREAMBLE = """Hello. I understand you'd like support.
-Please answer my questions one at a time and then we'll get you some help.
-When answering my questions by text, type **Cancel** in response to terminate the request.
-
-Do you need NSFW support? This would be for any adult topics or triggers as described in {chan} .
-Please react below with {u18} for NSFW, {yes} for regular support or {no} to cancel this request.
-"""
-REQUEST_PING = """Requesting support for "**{user}**", please respond {role}.
-{q_text}
-
-React with {yes} to take this ticket.
-Requesting user or "{admin_role}" may react with {no} to cancel request.
-
-Note: If nobody responds, please reping roles at most every 10 minutes or cancel request.
-"""
-TICKET_WELCOME = """{mention}
-This is a __private__ ticket. Please follow all server and support guidelines.
-It is logged and the log will be made available to user if requested.
-If there are any issues please ping staff.
-
-To close the ticket: `{prefix}ticket close A reason goes here.`
-To rename the ticket: `{prefix}ticket rename A new name for ticket`
-    Names of tickets should be < 100 characters and stick to spaces, letters, numbers and '-'.
-To get a new supporter (if they must go): `{prefix}ticket swap`
-"""
-PRACTICE_TICKET_WELCOME = """{mention}
-This is a **PRACTICE** ticket. Practice responding to an issue.
-At end please manually request a second responder to review and provide feedback.
-
-This is a __private__ ticket. Please follow all server and support guidelines.
-It is logged and the log will be made available to user if requested.
-If there are any issues please ping staff.
-
-To close the ticket: `{prefix}ticket close A reason goes here.`
-To rename the ticket: `{prefix}ticket A new name for ticket`
-    Names of tickets should be < 100 characters and stick to spaces, letters, numbers and '-'.
-To get a new supporter (if they must go): `{prefix}ticket swap`
-To start review of practice: `{prefix}ticket review`
-"""
-PRACTICE_REQUEST = """Requesting practice support for "**{user}**", please respond {role}.
-
-The responder to this ticket will practice a support of the kind requested by the user.
-At the end, initial user will have the session reviewed by a second responder for feedback.
-
-React with {yes} to take this ticket.
-Requesting user or "{admin_role}" may react with {no} to cancel request.
-
-Note: If nobody responds, please reping roles at most every 10 minutes or cancel request.
-"""
-PRACTICE_REVIEW = """{mention} please react to this message to review a practice session.
-
-You should have experience responding to tickets and free time to read session.
-Please provide feedback directly to the requesting user.
-"""
-SUPPORT_PIN_NOTICE = """
-Tickets can now be started by reacting to the above pin.
-If it is ever deleted simply rerun this command.
-I hope all goes well.
 """
 TICKET_CLOSE_PERMS = """
 Cannot DM the log of this ticket to the user who requested ticket.
@@ -186,12 +121,17 @@ Hello, this is a private ticket. It operates as follows:
     When a responder claims the ticket, only you, the responder and staff can see ticket.
     Access to other responders will be removed until you **unclaim** it or request **review**.
 
-To close ticket: {prefix}ticket close
+To close this ticket: {prefix}ticket close
 To get a new supporter: {prefix}ticket unclaim
 To get a reviewer: {prefix}ticket review
 """
 KEY_CAP = '\N{COMBINING ENCLOSING KEYCAP}'  # Usage: str(1) + NUM_KEY => keycap 1
+#  TICKET_INACTIVITY_SECS = 30 * 60
+TICKET_INACTIVITY_SECS = 60
+TICKET_INACTIVITY_WARNING = """Inactivity has been detected on this channel.
 
+Pinging users to provide the option to cancel ticket close. By default if no response provided this ticket will be closed."""
+TICKET_CLOSE_REASON = "Ticket over."
 
 # Permissions for various users involved
 DISCORD_PERMS = {
@@ -292,7 +232,6 @@ class Action():
 
 class StopChanges(Exception):
     """ Stop interactive changes. """
-    pass
 
 
 def create_msg_checker(first_msg):
@@ -338,26 +277,26 @@ You can always edit this pin message later without breaking the bot."""
         resp = await self.bot.wait_for('message', check=create_msg_checker(self.msg))
         if resp.content and resp.content == STOP_MSG:
             return "Aborting new pinned message."
-        else:
-            # If a pin exists in config, unpin and delete it.
-            if guild_config.pinned_message_id:
-                try:
-                    ticket_chan = self.msg.guild.get_channel(guild_config.ticket_channel_id)
-                    pinned = await ticket_chan.fetch_message(guild_config.pinned_message_id)
-                    await pinned.unpin()
-                    await pinned.delete()
-                except discord.errors.NotFound:
-                    pass
-                except discord.errors.Forbidden:
-                    pass
 
-            await resp.pin()
-            for ticket_config in guild_config.ticket_configs:
-                emoji = await self.msg.guild.fetch_emoji(ticket_config.emoji_id)
-                await resp.add_reaction(emoji)
-            guild_config.pinned_message_id = resp.id
+        # If a pin exists in config, unpin and delete it.
+        if guild_config.pinned_message_id:
+            try:
+                ticket_chan = self.msg.guild.get_channel(guild_config.ticket_channel_id)
+                pinned = await ticket_chan.fetch_message(guild_config.pinned_message_id)
+                await pinned.unpin()
+                await pinned.delete()
+            except discord.errors.NotFound:
+                pass
+            except discord.errors.Forbidden:
+                pass
 
-            return f"Pinning your message. Add ticket flows with: **{self.bot.prefix}admin ticket_setup** name_of_tickets"
+        await resp.pin()
+        for ticket_config in guild_config.ticket_configs:
+            emoji = await self.msg.guild.fetch_emoji(ticket_config.emoji_id)
+            await resp.add_reaction(emoji)
+        guild_config.pinned_message_id = resp.id
+
+        return f"Pinning your message. Add ticket flows with: **{self.bot.prefix}admin ticket_setup** name_of_tickets"
 
     async def guild_setup(self, guild_config):
         """
@@ -373,11 +312,11 @@ You can always edit this pin message later without breaking the bot."""
             resp = await client.wait_for('message', check=check)
             if resp and resp.content == STOP_MSG:
                 return
-            elif resp and len(resp.channel_mentions) == 1:
+            if resp and len(resp.channel_mentions) == 1:
                 resp_channel = resp.channel_mentions[0]
                 check_chan_perms(resp_channel, 'log_required')
                 guild_config.log_channel_id = resp_channel.id
-                await chan.send("Setting log channel to: {}".format(resp_channel.mention))
+                await chan.send(f"Setting log channel to: {resp_channel.mention}")
                 break
 
         while True:
@@ -385,11 +324,11 @@ You can always edit this pin message later without breaking the bot."""
             resp = await client.wait_for('message', check=check)
             if resp and resp.content == STOP_MSG:
                 return
-            elif resp and len(resp.channel_mentions) == 1:
+            if resp and len(resp.channel_mentions) == 1:
                 resp_channel = resp.channel_mentions[0]
                 check_chan_perms(resp_channel, 'support_required')
                 guild_config.ticket_channel_id = resp_channel.id
-                await chan.send("Setting tickets channel to: {}".format(resp_channel.mention))
+                await chan.send(f"Setting tickets channel to: {resp_channel.mention}")
                 break
 
         while True:
@@ -397,7 +336,7 @@ You can always edit this pin message later without breaking the bot."""
             resp = await client.wait_for('message', check=check)
             if resp and resp.content == STOP_MSG:
                 return
-            elif resp:
+            if resp:
                 found = [x for x in self.msg.guild.categories if x.name.lower() == resp.content.lower()]
                 if not found:
                     await chan.send("Failed to match category name, please try again.")
@@ -405,7 +344,7 @@ You can always edit this pin message later without breaking the bot."""
                     resp_channel = found[0]
                     check_chan_perms(resp_channel, 'category_required')
                     guild_config.category_channel_id = resp_channel.id
-                    await chan.send("Setting tickets category to: {}".format(resp_channel.name))
+                    await chan.send(f"Setting tickets category to: {resp_channel.name}")
                     break
 
         return f"Configuration completed! Create the main ticket pin with: **{client.prefix}admin pin**"
@@ -433,22 +372,22 @@ You can always edit this pin message later without breaking the bot."""
                     and event.emoji.id)
 
         check_msg = create_msg_checker(self.msg)
-        setup_intro = """Creating or updating a ticket flow called: {}.
+        setup_intro = f"""Creating or updating a ticket flow called: {ticket_config.name}.
 
-Please type a unique prefix of lenth < {} for ticket channels.""".format(ticket_config.name, tickdb.schema.LEN_TICKET_PREFIX)
+Please type a unique prefix of lenth < {tickdb.schema.LEN_TICKET_PREFIX} for ticket channels."""
         while True:
             await chan.send(MSG_OR_STOP.format(setup_intro))
             resp = await client.wait_for('message', check=check_msg)
             if resp and resp.content == STOP_MSG:
                 return
-            elif resp and len(resp.content) <= tickdb.schema.LEN_TICKET_PREFIX:
+            if resp and len(resp.content) <= tickdb.schema.LEN_TICKET_PREFIX:
                 ticket_config.prefix = resp.content
                 try:
                     self.session.flush()
                 except sqlalchemy.exc.IntegrityError:
                     self.session.rollback()
                     continue
-                await chan.send("Setting prefix for ticket channels to: {}".format(resp.content))
+                await chan.send(f"Setting prefix for ticket channels to: {resp.content}")
                 break
 
         while True:
@@ -457,20 +396,20 @@ Please type a unique prefix of lenth < {} for ticket channels.""".format(ticket_
             ticket_config.emoji_id = event.emoji.id
             try:
                 self.session.flush()
-                await chan.send("Setting emoji to start tickets: {}".format(event.emoji))
+                await chan.send(f"Setting emoji to start tickets: {event.emoji}")
                 break
             except sqlalchemy.exc.IntegrityError:
                 self.session.rollback()
                 continue
 
         while True:
-            await chan.send(MSG_OR_STOP.format("How long before tickets should timeout?\n\nAnswer in number of hours. 0 is no timeout."))
+            await chan.send(MSG_OR_STOP.format("How long before tickets inactivity timeout?\n\nAnswer in number of hours. 0 is default 30 mins."))
             resp = await client.wait_for('message', check=check_msg)
             if resp and resp.content == STOP_MSG:
                 return
             try:
                 ticket_config.timeout = int(float(resp.content) * 3600)
-                await chan.send("Setting {} tickets to timeout in: {} hours".format(ticket_config.name, resp.content))
+                await chan.send(f"Setting {ticket_config.name} tickets to timeout in: {resp.content} hours")
                 break
             except ValueError:
                 pass
@@ -480,7 +419,7 @@ Please type a unique prefix of lenth < {} for ticket channels.""".format(ticket_
             resp = await client.wait_for('message', check=check_msg)
             if resp and resp.content == STOP_MSG:
                 break
-            elif resp and len(resp.role_mentions) > 0:
+            if resp and len(resp.role_mentions) > 0:
                 tickdb.query.remove_roles_for_ticket(self.session, ticket_config)
                 self.session.commit()
                 role_text = ""
@@ -491,9 +430,9 @@ Please type a unique prefix of lenth < {} for ticket channels.""".format(ticket_
                         role_text=r_mention.name
                     )
                     self.session.add(role)
-                    role_text += "\n {}".format(r_mention.name)
+                    role_text += f"\n {r_mention.name}"
 
-                await chan.send("Setting roles to the following:\n{}".format(role_text))
+                await chan.send(f"Setting roles to the following:\n{role_text}")
                 break
 
         ticket_chan = self.msg.guild.get_channel(guild_config.ticket_channel_id)
@@ -513,9 +452,10 @@ Please type a unique prefix of lenth < {} for ticket channels.""".format(ticket_
 
         if ticket_config.tickets:
             await self.msg.channel.send("Warning! There are active tickets for this flow. It is best to remove when they are done.")
-        resp, msg = await wait_for_user_reaction(
-            self.bot, self.msg.channel, self.msg.author,
-            f"Please confirm that you want to remove ticket flow: {ticket_config.name}. This will only remove configuration and pin.")
+        resp, _ = await wait_for_user_reaction(
+            self.bot, self.msg.channel,
+            f"Please confirm that you want to remove ticket flow: {ticket_config.name}. This will only remove configuration and pin.",
+            author=self.msg.author)
         if not resp:
             raise asyncio.TimeoutError
 
@@ -575,8 +515,8 @@ Please type a unique prefix of lenth < {} for ticket channels.""".format(ticket_
             resp = await client.wait_for('message', check=check_msg)
             if resp and resp.content == STOP_MSG:
                 break
-            else:
-                tickdb.query.add_ticket_question(self.session, ticket_config, resp.content)
+
+            tickdb.query.add_ticket_question(self.session, ticket_config, resp.content)
 
         self.session.refresh(ticket_config)
         for ind, question in enumerate(ticket_config.questions, start=1):
@@ -663,53 +603,15 @@ class Ticket(Action):
         """
         try:
             ticket = tickdb.query.get_ticket(self.session, self.msg.guild.id, channel_id=self.msg.channel.id)
-        except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as e:
-            raise tick.exc.InvalidCommandArgs("I can only close within ticket channels.") from e
+        except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as exc:
+            raise tick.exc.InvalidCommandArgs("I can only close within ticket channels.") from exc
 
         chan = self.bot.get_channel(ticket.channel_id)
-        # Channel topic is format: A private ticket for username
-        user_name = chan.topic.split(" ")[-1]
-
         reason = ' '.join(self.args.reason)
-        resp, fname = '', ''
-        try:
-            resp, msg = await wait_for_user_reaction(
-                self.bot, self.msg.channel, self.msg.author,
-                "Please confirm that you want to close ticket by reacting below.")
-            if not resp:
-                raise asyncio.TimeoutError
 
-            fname = await create_log(msg, os.path.join(tempfile.mkdtemp(), self.msg.channel.name + ".txt"))
-            await log_channel.send(
-                LOG_TEMPLATE.format(action="Close", user=user_name,
-                                    msg="__Reason:__ {}".format(reason)),
-                files=[discord.File(fp=fname, filename=os.path.basename(fname))]
-            )
-
-            resp, _ = await wait_for_user_reaction(
-                self.bot, self.msg.channel, self.msg.author,
-                "Closing ticket. Do you want a log of this ticket DMed?")
-            if resp:
-                try:
-                    user = self.msg.guild.get_member(ticket.user_id)
-                    if user:
-                        await user.send("The log of your support session. Take care.",
-                                        files=[discord.File(fp=fname, filename=os.path.basename(fname))])
-                except discord.Forbidden:
-                    await self.msg.channel.send(TICKET_CLOSE_PERMS.format(self.msg.author.mention))
-                    return
-
-            await self.msg.channel.delete(reason=reason)
+        delete_ticket = await close_ticket(self.bot, chan, ticket, reason=reason, mention_users=False)
+        if delete_ticket:
             self.session.delete(ticket)
-        except asyncio.TimeoutError:
-            await self.msg.channel.send("Cancelling request to close ticket.")
-        except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound):
-            await self.msg.channel.send("A critical error found, database record could not be retrieved.")
-        finally:
-            try:
-                shutil.rmtree(os.path.dirname(fname))
-            except (FileNotFoundError, OSError):
-                pass
 
     async def unclaim(self, ticket, log_channel):
         """Unclaim a ticket from initial responder. Begins a swap process.
@@ -724,8 +626,8 @@ class Ticket(Action):
 
         try:
             ticket = tickdb.query.get_ticket(self.session, self.msg.guild.id, channel_id=self.msg.channel.id)
-        except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as e:
-            raise tick.exc.InvalidCommandArgs("I can only swap supporters in ticket channels.") from e
+        except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as exc:
+            raise tick.exc.InvalidCommandArgs("I can only swap supporters in ticket channels.") from exc
 
         chan = self.msg.channel
         mentions = " ".join([chan.guild.get_role(x.role_id).mention for x in ticket.ticket_config.roles])
@@ -772,10 +674,10 @@ class Ticket(Action):
 
         await log_channel.send(
             LOG_TEMPLATE.format(action="Swap", user=self.msg.author.name,
-                                msg="__Old Responder:__ {}\n__New Responder:__ {}".format(old_responder.name, responder.name)),
+                                msg=f"__Old Responder:__ {old_responder.name}\n__New Responder:__ {responder.name}"),
         )
 
-        return 'Hope your new responder {} can help. Take care!'.format(responder.mention)
+        return f'Hope your new responder {responder.mention} can help. Take care!'
 
     async def review(self, ticket, log_channel):
         """
@@ -783,8 +685,8 @@ class Ticket(Action):
         """
         try:
             ticket = tickdb.query.get_ticket(self.session, self.msg.guild.id, channel_id=self.msg.channel.id)
-        except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as e:
-            raise tick.exc.InvalidCommandArgs("I can only review inside ticket channels.") from e
+        except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as exc:
+            raise tick.exc.InvalidCommandArgs("I can only review inside ticket channels.") from exc
 
         chan = self.msg.channel
         mentions = " ".join([chan.guild.get_role(x.role_id).mention for x in ticket.ticket_config.roles])
@@ -830,13 +732,13 @@ class Ticket(Action):
 
         await log_channel.send(
             LOG_TEMPLATE.format(action="Reivew", user=self.msg.author.name,
-                                msg="__New Reviewer:__ {}".format(responder.name))
+                                msg=f"__New Reviewer:__ {responder.name}")
         )
 
-        return """Hello reviewer {}!. Above is a ticket.
+        return f"""Hello reviewer {responder.mention}!. Above is a ticket.
 Please read it over and provide feedback to requester who initiated the request.
 
-Thank you very much.""".format(responder.mention)
+Thank you very much."""
 
     async def execute(self):
         try:
@@ -846,8 +748,8 @@ Thank you very much.""".format(responder.mention)
             if not log_channel:
                 log_channel = aiomock.AIOMock()
                 log_channel.send.async_return_value = True
-        except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as e:
-            raise tick.exc.InvalidCommandArgs("Tickets not configured. See `{prefix}admin`".format(prefix=self.bot.prefix)) from e
+        except (sqla_oexc.NoResultFound, sqla_oexc.MultipleResultsFound) as exc:
+            raise tick.exc.InvalidCommandArgs(f"Tickets not configured. See `{self.bot.prefix}admin -h`") from exc
 
         try:
             func = getattr(self, self.args.subcmd)
@@ -869,8 +771,8 @@ class Help(Action):
         over = [
             'Here is an overview of my commands.',
             '',
-            'For more information do: `{}Command -h`'.format(prefix),
-            '       Example: `{}drop -h`'.format(prefix),
+            f'For more information do: `{prefix}Command -h`',
+            f'       Example: `{prefix}admin -h`',
             '',
         ]
         lines = [
@@ -898,13 +800,13 @@ class Status(Action):
         lines = [
             ['Created By', 'GearsandCogs'],
             ['Uptime', self.bot.uptime],
-            ['Version', '{}'.format(tick.__version__)],
+            ['Version', f'{tick.__version__}'],
         ]
 
         await self.msg.channel.send(tick.tbl.wrap_markdown(tick.tbl.format_table(lines)))
 
 
-async def new_ticket_request(client, chan, user, ticket_config):
+async def new_ticket_request(client, session, chan, user, ticket_config):
     """
     Within the newly made ticket:
         - Ask the user in the newly made tickets questions to gather information.
@@ -930,51 +832,148 @@ async def new_ticket_request(client, chan, user, ticket_config):
                 and event.member != client.user
                 and str(event.emoji) == EMOJIS['_yes'])
 
-    log_channel = chan.guild.get_channel(ticket_config.guild_config.log_channel_id)
+    log_channel = chan.guild.get_channel(ticket_config.guild.log_channel_id)
     await log_channel.send(
         LOG_TEMPLATE.format(action="Ticket Created", user=user.name,
                             msg=f"{ticket_config.name} ticket created.")
     )
     msg = await chan.send(TICKET_DIRECTIONS.format(prefix=client.prefix))
     await msg.pin()
+    ticket = tickdb.schema.Ticket(
+        guild_id=ticket_config.guild.id,
+        ticket_config_id=ticket_config.id,
+        user_id=user.id,
+        channel_id=chan.id,
+    )
+    session.add(ticket)
+    session.commit()
+
+    # Questions to user
+    pin_first = True
+    jump_url = "No jump set."
+    for question in ticket_config.questions:
+        msg = await chan.send(question)
+        if pin_first:
+            pin_first = False
+            jump_url = msg.jump_url
+            await msg.pin()
+        resp = await client.wait_for('message', check=check_msg)
+        tickdb.query.add_ticket_response(session, ticket, resp.content)
+
+    # Get someone to claim
+    mentions = " ".join([chan.guild.get_role(x.role_id).mention for x in ticket_config.roles])
+    msg = await chan.send(TICKET_UNCLAIMED.format(jump_url=jump_url, mentions=mentions))
+    await msg.add_reaction(EMOJIS['_yes'])
+    resp = await client.wait_for('raw_reaction_add', check=check_reaction)
+    ticket.responder_id = resp.member.id
+
+    # Remove responding roles, whitelist user
+    to_update = {chan.guild.get_role(x.role_id): DISCORD_PERMS['nothing'] for x in ticket.ticket_config.roles}
+    to_update[resp.member] = DISCORD_PERMS['user']
+    chan.overwrites.update(to_update)
+    await chan.edit(reason="Set ticket to claimed.", overwrites=chan.overwrites)
+
+    await log_channel.send(
+        LOG_TEMPLATE.format(action="Ticket Taken", user=user.name,
+                            msg=f"__Responder:__ {resp.member.name}"),
+    )
+    await chan.send(f'Hope your new responder {resp.member.mention} can help. Take care!')
+
+
+async def ticket_activity_monitor(client, interval):
+    """Monitor the activity of tickets, automatically close tickets that are inactive.
+
+    This task will schedule itself indefinitely once started.
+    It must continue operation.
+
+    Args:
+        client: The discord bot itself.
+        interval: The interval between running the checks, seconds.
+    """
     with tickdb.session_scope(tickdb.Session) as session:
-        ticket = tickdb.schema.Ticket(
-            guild_id=ticket_config.guild.id,
-            ticket_config_id=ticket_config.id,
-            user_id=user.id,
-            channel_id=chan.id,
-        )
-        session.add(ticket)
-        session.commit()
+        for guild_config in await tickdb.query.get_all_guild_configs(session):
+            for ticket in guild_config.tickets:
+                asyncio.create_task(check_ticket(client, ticket.guild_id, ticket.channel_id))
 
-        pin_first = True
-        jump_url = "No jump set."
-        for question in ticket_config.questions:
-            msg = await chan.send(question)
-            if pin_first:
-                pin_first = False
-                jump_url = msg.jump_url
-                await msg.pin()
-            resp = await client.wait_for('message', check=check_msg)
-            tickdb.query.add_ticket_response(session, ticket, resp.content)
+    await asyncio.sleep(interval)
+    asyncio.create_task(ticket_activity_monitor(client, interval))
 
-        mentions = " ".join([chan.guild.get_role(x.role_id).mention for x in ticket_config.roles])
-        msg = await chan.send(TICKET_UNCLAIMED.format(jump_url=jump_url, mentions=mentions))
-        await msg.add_reaction(EMOJIS['_yes'])
-        resp = await client.wait_for('raw_reaction_add', check=check_reaction)
-        ticket.responder_id = resp.member.id
 
-        # Remove responding roles, whitelist user
-        to_update = {chan.guild.get_role(x.role_id): DISCORD_PERMS['nothing'] for x in ticket.ticket_config.roles}
-        to_update[resp.member] = DISCORD_PERMS['user']
-        chan.overwrites.update(to_update)
-        await chan.edit(reason="Set ticket to claimed.", overwrites=chan.overwrites)
+async def check_ticket(client, guild_id, channel_id):
+    """Check a ticket for activity.
 
+    Args:
+        client: The bot client.
+        ticket_id: The ticket object from db.
+    """
+    now = datetime.datetime.utcnow()
+    with tickdb.session_scope(tickdb.Session) as session:
+        ticket = tickdb.query.get_ticket(session, guild_id, channel_id=channel_id)
+        t_channel = client.get_channel(ticket.channel_id)
+
+        if not t_channel:  # Cleanup leftovers if something went wrong or channel removed
+            session.delete(ticket)
+            return
+
+        async for msg in t_channel.history(limit=100):
+            if msg.author == client.user:  # Skip bot messages
+                continue
+
+            if (now - msg.created_at).seconds > TICKET_INACTIVITY_SECS:
+                deleted = await close_ticket(client, t_channel, ticket, timeout_confirms=True)
+                if deleted:
+                    session.delete(ticket)
+
+            break  # Only look at last message not bot
+
+
+async def close_ticket(client, channel, ticket, *, timeout_confirms=False,
+                       reason=TICKET_CLOSE_REASON, mention_users=True):
+    fname = ''
+    try:
+        # Channel topic is format: A private ticket for username, user might not still be on server
+        username = channel.topic.split(" ")[-1]
+        guard_number = 100
+        mention = ''
+        if mention_users:
+            mention = f"{channel.guild.get_member(ticket.user_id).mention}"
+            if ticket.responder_id:
+                mention = f"{channel.guild.get_member(ticket.responder_id).mention}"
+
+        if timeout_confirms:
+            await channel.send(TICKET_INACTIVITY_WARNING)
+        close_confirmed, dm_log = await ask_to_close_ticket(client, channel, timeout=30,
+                                                            default_on_timeout=guard_number, mention=mention)
+        if not close_confirmed or (not timeout_confirms and close_confirmed == guard_number):
+            await channel.send("Cancelling ticket close.")
+            return False
+
+        last_msg = await channel.fetch_message(channel.last_message_id)
+        fname = await create_log(last_msg, os.path.join(tempfile.mkdtemp(), channel.name + ".txt"))
+        if dm_log:
+            try:
+                user = channel.guild.get_member(ticket.user_id)
+                if user:
+                    await user.send("The log of your support session. Take care.",
+                                    files=[discord.File(fp=fname, filename=os.path.basename(fname))])
+            except discord.Forbidden:
+                await channel.send(TICKET_CLOSE_PERMS.format(username))
+
+        log_channel = client.get_channel(ticket.guild.log_channel_id)
+        if timeout_confirms  and close_confirmed == guard_number:
+            reason = "Inactive ticket."
         await log_channel.send(
-            LOG_TEMPLATE.format(action="Ticket Taken", user=user.name,
-                                msg="__Responder:__ {}".format(resp.member.name)),
+            LOG_TEMPLATE.format(action="Close", user=username,
+                                msg=f"__Reason:__ {reason}"),
+            files=[discord.File(fp=fname, filename=os.path.basename(fname))]
         )
-        await chan.send('Hope your new responder {} can help. Take care!'.format(resp.member.mention))
+        await channel.delete(reason=reason)
+        return True
+    finally:
+        try:
+            shutil.rmtree(os.path.dirname(fname))
+        except (FileNotFoundError, OSError):
+            pass
 
 
 async def create_log(last_msg, fname=None):
@@ -988,7 +987,7 @@ async def create_log(last_msg, fname=None):
     Returns: The file path.
     """
     if not fname:
-        fname = "{:50}.txt".format(last_msg.channel.name)
+        fname = f"{last_msg.channel.name:50}.txt"
     async for msg in last_msg.channel.history(limit=1, oldest_first=True):
         first_msg = msg
 
@@ -1013,17 +1012,64 @@ async def create_log(last_msg, fname=None):
     return fname
 
 
-async def wait_for_user_reaction(client, chan, author, text, *, yes=EMOJIS['_yes'], no=EMOJIS['_no']):
+async def ask_to_close_ticket(client, channel, *,
+                              author=None, timeout=RESPONSE_TIMEOUT, default_on_timeout=False, mention=''):
+    """Ask users in a ticket the following:
+    Will ping both users on first dialog.
+
+    Args:
+        client: The bot itself.
+        channel: The channel of the ticket.
+
+    Kwargs:
+        author: If passed in, will only allow author to respond. Default is None, no restriction.
+        timeout: A timeout to use as max possible.
+        default_on_timeout: Assume this boolean for close_confirmed on timeout.
+        mention: If passed in, will be appended to close request to get users attention. By default it is nothing.
+
+    Returns:
+        (close_confirmed, dm_log):
+            close_confirmed - User has confirmed desire to close this. Otherwise, timeout expired and automatic assume.
+            dm_log - User explicitly indicated would like log of ticket. On timeout of confirmation, assumed no.
+    """
+    close_confirmed = False
+    dm_log = False
+
+    try:
+        close_text = f"Please confirm that you want to close ticket by reacting below.\n\n{mention}"
+        close_confirmed, _ = await wait_for_user_reaction(
+            client, channel,
+            close_text,
+            author=author, timeout=timeout)
+
+        if not close_confirmed:  # Do not bother people cancelling with DM question.
+            return False, False
+
+        dm_log, _ = await wait_for_user_reaction(
+            client, channel,
+            "Closing ticket. Do you want a log of this ticket DMed to user?",
+            author=author, timeout=timeout)
+    except asyncio.TimeoutError:
+        close_confirmed = default_on_timeout
+        dm_log = False
+
+    return (close_confirmed, dm_log)
+
+
+async def wait_for_user_reaction(client, chan, text, *,
+                                 author=None, timeout=RESPONSE_TIMEOUT,
+                                 yes_emoji=EMOJIS['_yes'], no_emoji=EMOJIS['_no']):
     """
     A simple reusable mechanism to present user with a choice and wait for reaction.
 
     Args:
         client: The bot client.
-        orig_msg: A previous message in desired channel from author.
+        chan: The channel to send the message to.
         text: The message to send to channel.
     Kwargs:
-        yes: The yes emoji to use in unicode.
-        no: The no emoji to use in unicode.
+        author: The only author allowed to react. Default none, anyone can.
+        yes_emoji: The yes emoji to use in unicode.
+        no_emoji: The no emoji to use in unicode.
 
     Returns: (Boolean, msg_sent)
         True if user accepted otherwise False.
@@ -1032,12 +1078,16 @@ async def wait_for_user_reaction(client, chan, author, text, *, yes=EMOJIS['_yes
         TimeoutError - User didn't react within the timeout.
     """
     msg = await chan.send(text)
-    await msg.add_reaction(yes)
-    await msg.add_reaction(no)
+    await msg.add_reaction(yes_emoji)
+    await msg.add_reaction(no_emoji)
 
-    def check(react, user):
-        return user == author and str(react) in (yes, no)
+    def check_reaction(react, user):
+        if author:
+            if user != author:
+                return False
 
-    react, _ = await client.wait_for('reaction_add', check=check, timeout=RESPONSE_TIMEOUT)
+        return str(react) in (yes_emoji, no_emoji)
 
-    return str(react) == yes, msg
+    react, _ = await client.wait_for('reaction_add', check=check_reaction, timeout=timeout)
+
+    return str(react) == yes_emoji, msg

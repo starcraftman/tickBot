@@ -187,14 +187,16 @@ class TickBot(discord.Client):
                 ticket_name = f"{ticket_config.prefix}_{payload.member.name:.10}_{time}"
                 ticket_category = self.get_channel(ticket_config.guild.category_channel_id)
                 ticket_channel = await guild.create_text_channel(name=ticket_name,
-                                                                 topic="A private ticket for {}".format(payload.member.name),
+                                                                 topic=f"A private ticket for {payload.member.name}",
                                                                  overwrites=chan.overwrites,
                                                                  category=ticket_category)
 
                 await msg.remove_reaction(payload.emoji, payload.member)
 
                 # Initiate ticket flow here
-                await tick.actions.new_ticket_request(self, ticket_channel, payload.member, ticket_config)
+                with tickdb.session_scope(tickdb.Session) as session:
+                    await tick.actions.new_ticket_request(self, session, ticket_channel,
+                                                          payload.member, ticket_config)
         except (sqlalchemy.orm.exc.NoResultFound, discord.errors.NotFound):
             pass
         except tick.exc.UserException as exc:
@@ -211,6 +213,9 @@ class TickBot(discord.Client):
             log.info('  "%s" with id %s', guild.name, guild.id)
 
         self.emoji.update(self.guilds)
+        interval = tick.util.get_config('monitor_interval', default=600)
+        asyncio.ensure_future(tick.actions.ticket_activity_monitor(self, interval=interval))
+
         print('Bot Ready!')
 
     async def ignore_message(self, message):
@@ -278,8 +283,9 @@ class TickBot(discord.Client):
                 try:
                     self.parser.parse_args(content.split(' ')[0:1] + ['--help'])
                 except tick.exc.ArgumentHelpError as exc2:
+                    pad = len(exc.message) * '-'
                     exc.message = 'Invalid command use. Check the command help.'
-                    exc.message += '\n{}\n{}'.format(len(exc.message) * '-', exc2.message)
+                    exc.message += f'\n{pad}\n{exc2.message}'
 
             await self.send_ttl_message(channel, exc.reply())
             try:
@@ -321,7 +327,7 @@ class TickBot(discord.Client):
         except KeyError:
             ttl = tick.util.get_config('ttl')
 
-        content += '\n\n__This message will be deleted in {} seconds__'.format(ttl)
+        content += '\n\n__This message will be deleted in {ttl} seconds__'
         message = await destination.send(content, **kwargs)
 
         await asyncio.sleep(ttl)
