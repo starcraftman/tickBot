@@ -214,7 +214,7 @@ class TickBot(discord.Client):
 
         self.emoji.update(self.guilds)
         interval = tick.util.get_config('monitor_interval', default=600)
-        asyncio.ensure_future(tick.actions.ticket_activity_monitor(self, interval=interval))
+        asyncio.create_task(tick.actions.ticket_activity_monitor(self, interval=interval))
 
         print('Bot Ready!')
 

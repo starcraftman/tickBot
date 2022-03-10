@@ -80,7 +80,7 @@ TICKET_CONFIG_SUMMARY = """
 Name: {name}
 Prefix: {prefix}
 Emoji: {emoji}
-Timeout: {timeout}
+Monitor Activity: {monitor_activity}
 Responding Roles: {roles}
 """
 MSG_OR_STOP = "{}\n\nType 'stop' to cancel or stop here."
@@ -402,17 +402,12 @@ Please type a unique prefix of lenth < {tickdb.schema.LEN_TICKET_PREFIX} for tic
                 self.session.rollback()
                 continue
 
-        while True:
-            await chan.send(MSG_OR_STOP.format("How long before tickets inactivity timeout?\n\nAnswer in number of hours. 0 is default 30 mins."))
-            resp = await client.wait_for('message', check=check_msg)
-            if resp and resp.content == STOP_MSG:
-                return
-            try:
-                ticket_config.timeout = int(float(resp.content) * 3600)
-                await chan.send(f"Setting {ticket_config.name} tickets to timeout in: {resp.content} hours")
-                break
-            except ValueError:
-                pass
+        ticket_config.monitor_activity, _ = await wait_for_user_reaction(
+            self.bot, self.msg.channel,
+            "Do you want activity monitored? Inactive tickets will be auto closed after warning.",
+            author=self.msg.author
+        )
+        await chan.send(f"Inactivity monitoring for these tickets: {ticket_config.monitor_activity}")
 
         while True:
             await chan.send(MSG_OR_STOP.format("Mention ALL the roles you want to respond to these tickets."))
@@ -891,9 +886,8 @@ async def ticket_activity_monitor(client, interval):
         interval: The interval between running the checks, seconds.
     """
     with tickdb.session_scope(tickdb.Session) as session:
-        for guild_config in await tickdb.query.get_all_guild_configs(session):
-            for ticket in guild_config.tickets:
-                asyncio.create_task(check_ticket(client, ticket.guild_id, ticket.channel_id))
+        for ticket in tickdb.query.get_all_tickets(session, remove_ignored=True):
+            asyncio.create_task(check_ticket(client, ticket.guild_id, ticket.channel_id))
 
     await asyncio.sleep(interval)
     asyncio.create_task(ticket_activity_monitor(client, interval))
@@ -929,7 +923,7 @@ async def check_ticket(client, guild_id, channel_id):
 
 async def close_ticket(client, channel, ticket, *, timeout_confirms=False,
                        reason=TICKET_CLOSE_REASON, mention_users=True):
-    fname = ''
+    fname, close_confirmed, dm_log = '', None, None
     try:
         # Channel topic is format: A private ticket for username, user might not still be on server
         username = channel.topic.split(" ")[-1]
@@ -942,11 +936,16 @@ async def close_ticket(client, channel, ticket, *, timeout_confirms=False,
 
         if timeout_confirms:
             await channel.send(TICKET_INACTIVITY_WARNING)
-        close_confirmed, dm_log = await ask_to_close_ticket(client, channel, timeout=30,
-                                                            default_on_timeout=guard_number, mention=mention)
-        if not close_confirmed or (not timeout_confirms and close_confirmed == guard_number):
-            await channel.send("Cancelling ticket close.")
-            return False
+        try:
+            close_confirmed, dm_log = await ask_to_close_ticket(client, channel, timeout=30,
+                                                                default_on_timeout=guard_number, mention=mention)
+            if not close_confirmed:
+                await channel.send("Cancelling ticket close.")
+                return False
+        except asyncio.TimeoutError:
+            if not timeout_confirms:
+                await channel.send("Cancelling ticket close.")
+                return False
 
         last_msg = await channel.fetch_message(channel.last_message_id)
         fname = await create_log(last_msg, os.path.join(tempfile.mkdtemp(), channel.name + ".txt"))
@@ -1031,27 +1030,26 @@ async def ask_to_close_ticket(client, channel, *,
         (close_confirmed, dm_log):
             close_confirmed - User has confirmed desire to close this. Otherwise, timeout expired and automatic assume.
             dm_log - User explicitly indicated would like log of ticket. On timeout of confirmation, assumed no.
+
+    Raises:
+        asyncio.TimeoutError : User didn't respond in time.
     """
     close_confirmed = False
     dm_log = False
 
-    try:
-        close_text = f"Please confirm that you want to close ticket by reacting below.\n\n{mention}"
-        close_confirmed, _ = await wait_for_user_reaction(
-            client, channel,
-            close_text,
-            author=author, timeout=timeout)
+    close_text = f"Please confirm that you want to close ticket by reacting below.\n\n{mention}"
+    close_confirmed, _ = await wait_for_user_reaction(
+        client, channel,
+        close_text,
+        author=author, timeout=timeout)
 
-        if not close_confirmed:  # Do not bother people cancelling with DM question.
-            return False, False
+    if not close_confirmed:  # Do not bother people cancelling with DM question.
+        return False, False
 
-        dm_log, _ = await wait_for_user_reaction(
-            client, channel,
-            "Closing ticket. Do you want a log of this ticket DMed to user?",
-            author=author, timeout=timeout)
-    except asyncio.TimeoutError:
-        close_confirmed = default_on_timeout
-        dm_log = False
+    dm_log, _ = await wait_for_user_reaction(
+        client, channel,
+        "Closing ticket. Do you want a log of this ticket DMed to user?",
+        author=author, timeout=timeout)
 
     return (close_confirmed, dm_log)
 

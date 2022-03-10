@@ -82,10 +82,10 @@ class TicketConfig(Base):
     name = sqla.Column(sqla.String(LEN_TICKET_NAME), default=tick.util.NOT_SET)  # Name for convenience
     prefix = sqla.Column(sqla.String(LEN_TICKET_PREFIX), default=tick.util.NOT_SET)  # Prefix for ticket names
     emoji_id = sqla.Column(sqla.BigInteger, default=0)  # Emoji id to react and make ticket with
-    timeout = sqla.Column(sqla.Integer, default=DEFAULT_TICKET_TIMEOUT)  # Timeout for tickets to idle and cleanup
+    monitor_activity = sqla.Column(sqla.Boolean, default=True)  # When true monitor inactivity of ticket
 
     def __repr__(self):
-        keys = ['id', 'guild_id', 'name', 'emoji_id', 'prefix', 'prefix']
+        keys = ['id', 'guild_id', 'name', 'emoji_id', 'prefix', 'monitor_activity']
         kwargs = ['{}={!r}'.format(key, getattr(self, key)) for key in keys]
 
         return "{}({})".format(self.__class__.__name__, ', '.join(kwargs))
@@ -101,13 +101,12 @@ class TicketConfig(Base):
         if self.roles:
             roles = ", ".join([role.role_text for role in self.roles])
 
-        timeout_str = "{:3.2f} hours ({} seconds)".format(float(self.timeout) / 3600.0, self.timeout)
         return {
             'name': self.name,
             'prefix': self.prefix,
             'emoji': tick.util.NOT_SET,
             'emoji_id': self.emoji_id,
-            'timeout': timeout_str,
+            'monitor_activity': self.monitor_activity,
             'roles': roles,
         }
 

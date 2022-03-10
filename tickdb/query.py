@@ -113,24 +113,19 @@ def get_ticket(session, guild_id, *, user_id=None, channel_id=None):
     return query.one()
 
 
-async def get_active_tickets(session, guild):
-    """
-    Get all tickets for the guild.
-
-    Args:
-        session: Session to the db.
-        guild: The guild being examined.
-
-    Returns:
-        all_ticks: All tickets currently in system for guild.
-    """
-    return session.query(Ticket).filter(Ticket.guild_id == guild.id).all()
-
-
-async def get_all_guild_configs(session):
+def get_all_tickets(session, guild_id=None, remove_ignored=False):
     """Return all active guild configurations.
 
     Args:
         session: Session to the db.
+        remove_ignored: Ignore tickets set to be unmonitored for activity.
     """
-    return session.query(GuildConfig).all()
+    query = session.query(Ticket)
+
+    if guild_id:
+        query = query.filter(Ticket.guild_id == guild_id)
+    if remove_ignored:
+        query = query.join(TicketConfig).\
+            filter(TicketConfig.monitor_activity)
+
+    return query.all()
