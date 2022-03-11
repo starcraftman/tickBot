@@ -27,7 +27,7 @@ import tick.util
 
 MYSQL_SPEC = 'mysql+pymysql://{user}:{pass}@{host}/{db}?charset=utf8mb4'
 CREDS = tick.util.get_config('dbs', 'main')
-CREDS['db'] = 'tick'
+CREDS['db'] = 'tick_new'
 
 TEST_DB = False
 if 'pytest' in sys.modules:

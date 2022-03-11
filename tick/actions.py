@@ -130,7 +130,8 @@ KEY_CAP = '\N{COMBINING ENCLOSING KEYCAP}'  # Usage: str(1) + NUM_KEY => keycap 
 TICKET_INACTIVITY_SECS = 60
 TICKET_INACTIVITY_WARNING = """Inactivity has been detected on this channel.
 
-Pinging users to provide the option to cancel ticket close. By default if no response provided this ticket will be closed."""
+If you wish to continue please cancel this automatic close.
+By default if no response provided in 5 minutes this ticket will be closed."""
 TICKET_CLOSE_REASON = "Ticket over."
 
 # Permissions for various users involved
@@ -936,16 +937,18 @@ async def close_ticket(client, channel, ticket, *, timeout_confirms=False,
 
         if timeout_confirms:
             await channel.send(TICKET_INACTIVITY_WARNING)
+        cancel_close = False
         try:
-            close_confirmed, dm_log = await ask_to_close_ticket(client, channel, timeout=30,
+            close_confirmed, dm_log = await ask_to_close_ticket(client, channel, timeout=300,
                                                                 default_on_timeout=guard_number, mention=mention)
             if not close_confirmed:
-                await channel.send("Cancelling ticket close.")
-                return False
+                cancel_close = True
         except asyncio.TimeoutError:
             if not timeout_confirms:
-                await channel.send("Cancelling ticket close.")
-                return False
+                cancel_close = True
+        if cancel_close:
+            await channel.send("Cancelling ticket close.")
+            return False
 
         last_msg = await channel.fetch_message(channel.last_message_id)
         fname = await create_log(last_msg, os.path.join(tempfile.mkdtemp(), channel.name + ".txt"))
