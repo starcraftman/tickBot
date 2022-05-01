@@ -8,3 +8,10 @@ __User Feedback/Ideas__
 - Rather than swap, simply make it unclaimed and back to initial state.
 - Pin a control panel inside each ticket with reactions to handle changing state:
   close ticket, unclaim, report issue?
+
+
+__Bugs__
+Also why does the inactivity detection thing only ping Codex when Codex had unclaimed the ticket by then (and it didn't ping me the supportee. Just wondering if that's on purpose)?
+
+Also why does Codex pressing the check on the inactivity detection elicit the message that he's now the supportee  (edited)
+

@@ -327,7 +327,7 @@ class TickBot(discord.Client):
         except KeyError:
             ttl = tick.util.get_config('ttl')
 
-        content += '\n\n__This message will be deleted in {ttl} seconds__'
+        content += f"\n\n__This message will be deleted in {ttl} seconds__"
         message = await destination.send(content, **kwargs)
 
         await asyncio.sleep(ttl)
